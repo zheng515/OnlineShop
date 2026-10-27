@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Product Management · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-head">
+      <h1>Product Management</h1>
+      <button type="button" class="btn" id="add-btn">+ Add Product</button>
+    </div>
+
+    <form class="search-bar" id="search-form" role="search" style="margin-bottom: 1.25rem">
+      <input type="search" id="search-input" placeholder="Search products by name…" aria-label="Search products">
+      <button type="submit" class="btn">Search</button>
+      <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
+    </form>
+
+    <div id="list-message" class="hidden"></div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Image</th>
+              <th>Name</th>
+              <th>Price</th>
+              <th class="stock-cell">S</th>
+              <th class="stock-cell">M</th>
+              <th class="stock-cell">L</th>
+              <th class="stock-cell">XL</th>
+              <th class="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="product-rows">
+            <tr><td colspan="8" class="loading">Loading products…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add / edit product -->
+  <div class="modal-backdrop hidden" id="form-modal">
+    <form class="card modal" id="product-form" novalidate>
+      <div class="modal-header">
+        <h2 id="form-title">Add Product</h2>
+        <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-error" class="hidden" role="alert"></div>
+
+        <div class="field">
+          <label for="image-input">Product image <span class="muted">*</span></label>
+          <div class="image-upload">
+            <div class="preview" id="image-preview">No image</div>
+            <div>
+              <input type="file" id="image-input" accept="image/jpeg,image/png,image/gif,image/webp">
+              <div class="field-hint" id="image-hint">JPEG, PNG, GIF or WEBP, up to 5 MB.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="name-input">Name <span class="muted">*</span></label>
+          <input type="text" id="name-input" maxlength="100" required>
+        </div>
+
+        <div class="field">
+          <label for="price-input">Price (<span class="currency"></span>) <span class="muted">*</span></label>
+          <input type="text" id="price-input" inputmode="decimal" placeholder="e.g. 19.99" required>
+        </div>
+
+        <div class="field">
+          <label>Sizes and stock <span class="muted">*</span></label>
+          <div class="size-stock-grid" id="size-stock-grid"></div>
+          <div class="field-hint">Tick each available size and enter its stock quantity (0 or more).</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="submit" class="btn" id="save-btn">Save Product</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Product details -->
+  <div class="modal-backdrop hidden" id="detail-modal">
+    <div class="card modal">
+      <div class="modal-header">
+        <h2>Product Details</h2>
+        <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body" id="detail-body"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
+        <button type="button" class="btn" id="detail-edit-btn">Edit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete confirmation -->
+  <div class="modal-backdrop hidden" id="delete-modal">
+    <div class="card modal modal-sm" role="alertdialog" aria-labelledby="delete-title">
+      <div class="modal-header">
+        <h2 id="delete-title">Delete product?</h2>
+        <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="delete-text"></p>
+        <p class="muted">This action cannot be undone.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>
