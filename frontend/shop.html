@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-head">
+      <h1>Products</h1>
+      <form class="search-bar" id="search-form" role="search">
+        <input type="search" id="search-input" placeholder="Search products by name…" aria-label="Search products">
+        <button type="submit" class="btn">Search</button>
+        <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
+      </form>
+    </div>
+
+    <div id="search-message" class="hidden"></div>
+    <div class="product-grid" id="product-grid">
+      <div class="loading">Loading products…</div>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/shop.js"></script>
+</body>
+</html>
