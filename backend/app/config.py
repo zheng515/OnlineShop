@@ -1,7 +1,8 @@
 """Application settings, overridable through environment variables."""
 
 import os
-from dataclasses import dataclass
+import secrets
+from dataclasses import dataclass, field
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -26,6 +27,16 @@ class Settings:
     database_url: str = ""
     # Apply pending migrations at start-up; turn off where migrations run separately (FR69).
     auto_migrate: bool = True
+    # Payments (FR79, FR84-FR86). "mock" is the built-in test provider; it moves no money.
+    payment_provider: str = "mock"
+    payment_timeout_minutes: int = 30
+    # Secret that payment notifications are signed with (FR81). A real provider supplies it;
+    # without one, each server start picks a random secret, so nobody can forge notifications.
+    # (The mock provider delivers its notifications inside the server, so it needs no fixed value.)
+    payment_webhook_secret: str = field(default_factory=lambda: secrets.token_urlsafe(32))
+    currency: str = "USD"
+    # How often expired unpaid orders are cancelled; 0 turns the background job off (FR79).
+    job_interval_seconds: int = 60
 
     def __post_init__(self) -> None:
         if not self.database_url:
@@ -42,4 +53,9 @@ def load_settings() -> Settings:
         cookie_secure=os.environ.get("SHOP_COOKIE_SECURE", "0") == "1",
         database_url=os.environ.get("SHOP_DATABASE_URL", ""),
         auto_migrate=os.environ.get("SHOP_AUTO_MIGRATE", "1") != "0",
+        payment_provider=os.environ.get("SHOP_PAYMENT_PROVIDER", "mock"),
+        payment_timeout_minutes=int(os.environ.get("SHOP_PAYMENT_TIMEOUT_MINUTES", "30")),
+        payment_webhook_secret=os.environ.get("SHOP_PAYMENT_WEBHOOK_SECRET") or secrets.token_urlsafe(32),
+        currency=os.environ.get("SHOP_CURRENCY", "USD"),
+        job_interval_seconds=int(os.environ.get("SHOP_JOB_INTERVAL_SECONDS", "60")),
     )

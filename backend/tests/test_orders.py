@@ -1,12 +1,16 @@
 import threading
 import uuid
+from datetime import timedelta
 
 from app.database import connect
 from app.errors import ValidationProblem
 from app.order_service import place_order
 from app.orders import Line
+from app.security import utcnow
 
-from conftest import create_product, login, update_product, upload_image
+from conftest import complete_mock_payment, create_product, login, update_product, upload_image
+
+LATER = utcnow() + timedelta(hours=1)
 
 
 def add_to_cart(client, headers, product_id, size, quantity):
@@ -18,6 +22,12 @@ def add_to_cart(client, headers, product_id, size, quantity):
 def place(client, headers, expected_total, request_id=None, **source):
     body = {"source": "cart", **source, "expected_total": expected_total, "request_id": request_id or uuid.uuid4().hex}
     return client.post("/api/orders", json=body, headers=headers)
+
+
+def place_and_pay(client, headers, expected_total, **source):
+    order = place(client, headers, expected_total, **source).json()
+    assert complete_mock_payment(client, order["payment_url"]).status_code == 200
+    return client.get(f"/api/orders/{order['id']}", headers=headers).json()
 
 
 def stock_of(client, admin, product_id):
@@ -32,11 +42,13 @@ def test_cart_order_deducts_stock_and_empties_cart(client, admin, customer):
     response = place(client, customer, 30.0)
     assert response.status_code == 201, response.text
     order = response.json()
-    assert order["status"] == "placed"
+    assert order["status"] == "awaiting_payment"
+    assert order["payment_url"].startswith("/mock-pay.html?session=mock_")
+    assert 0 < order["seconds_left"] <= 30 * 60
     assert order["number"] == f"#{order['id']:06d}"
     assert order["total"] == 30.0
     assert [(i["size"], i["quantity"], i["subtotal"]) for i in order["items"]] == [("S", 2, 20.0), ("M", 1, 10.0)]
-    assert order["history"][0]["status"] == "placed"
+    assert order["history"][0]["status"] == "awaiting_payment"
     assert order["allowed_actions"] == ["cancelled"]
 
     assert stock_of(client, admin, shirt["id"]) == {"S": 3, "M": 1}
@@ -104,7 +116,7 @@ def test_concurrent_orders_never_oversell(client, admin):
         conn = connect(database_url)
         try:
             user = conn.execute("SELECT id, username, role FROM users WHERE username = ?", (username,)).fetchone()
-            place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, uuid.uuid4().hex)
+            place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, uuid.uuid4().hex, LATER)
             results.append("ok")
         except ValidationProblem:
             results.append("rejected")
@@ -133,7 +145,7 @@ def test_customer_history_and_cancel_restores_stock(client, admin, customer):
     assert response.status_code == 200, response.text
     cancelled = response.json()
     assert cancelled["status"] == "cancelled"
-    assert [e["status"] for e in cancelled["history"]] == ["placed", "cancelled"]
+    assert [e["status"] for e in cancelled["history"]] == ["awaiting_payment", "cancelled"]
     assert cancelled["allowed_actions"] == []
     assert stock_of(client, admin, shirt["id"]) == {"S": 4, "M": 4}
 
@@ -184,9 +196,13 @@ def test_customers_only_see_their_own_orders(client, admin, customer):
 
 def test_admin_status_flow(client, admin, customer):
     shirt = create_product(client, admin, price="3", stock={"S": 5}).json()
-    order = place(client, customer, 3.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
-    url = f"/api/admin/orders/{order['id']}/status"
+    unpaid = place(client, customer, 3.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
+    unpaid_url = f"/api/admin/orders/{unpaid['id']}/status"
+    assert "cannot be marked as Shipped" in client.post(unpaid_url, json={"status": "shipped"}, headers=admin).json()["detail"]
 
+    order = place_and_pay(client, customer, 3.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1)
+    assert order["status"] == "paid" and order["paid_at"]
+    url = f"/api/admin/orders/{order['id']}/status"
     assert client.post(url, json={"status": "completed"}, headers=admin).status_code == 409
     shipped = client.post(url, json={"status": "shipped"}, headers=admin).json()
     assert shipped["status"] == "shipped" and shipped["allowed_actions"] == ["completed"]
@@ -194,7 +210,8 @@ def test_admin_status_flow(client, admin, customer):
     assert client.post(url, json={"status": "cancelled"}, headers=admin).status_code == 409
     completed = client.post(url, json={"status": "completed"}, headers=admin).json()
     assert [(e["status"], e["actor_role"]) for e in completed["history"]] == [
-        ("placed", "customer"),
+        ("awaiting_payment", "customer"),
+        ("paid", "system"),
         ("shipped", "admin"),
         ("completed", "admin"),
     ]
@@ -203,7 +220,7 @@ def test_admin_status_flow(client, admin, customer):
 
 def test_admin_order_list_filter_and_search(client, admin, customer):
     shirt = create_product(client, admin, price="1", stock={"S": 10}).json()
-    first = place(client, customer, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
+    first = place_and_pay(client, customer, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1)
     bob = login(client, "bob", "bob12345", "customer")
     second = place(client, bob, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
     client.post(f"/api/admin/orders/{first['id']}/status", json={"status": "shipped"}, headers=admin)
@@ -229,7 +246,7 @@ def test_concurrent_duplicate_submissions_create_one_order(client, admin):
         conn = connect(database_url)
         try:
             user = conn.execute("SELECT id, username, role FROM users WHERE username = 'alice'").fetchone()
-            results.append(place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, "same-request-xyz"))
+            results.append(place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, "same-request-xyz", LATER))
         finally:
             conn.close()
 

@@ -16,6 +16,10 @@
 > - **Rev. 6** adds deployment, data management and quality requirements (Section 11, FR68–FR77):
 >   PostgreSQL support, versioned schema migrations, configuration, container deployment, health
 >   checks, backups, automated tests in a browser, code checks and continuous integration.
+> - **Rev. 7** adds online payment (Section 12, FR78–FR87) through a built-in **mock payment
+>   provider** that behaves like a real one but moves no money. Orders now wait for payment, and
+>   unpaid orders are cancelled automatically when their payment deadline passes. FR32, FR38, FR41,
+>   FR43, FR46, FR47, FR48 and FR49 are updated accordingly.
 
 ## 1. Login and Access Control
 
@@ -172,9 +176,9 @@ If a product's price changes after it has been added to the cart, the system sha
 **FR31 — Return from Checkout**  
 The system shall allow customers to return from the Checkout page to the shopping cart or product detail page to revise their selections. Cart checkout returns to the shopping cart; direct purchase returns to the product detail page with the previously selected size and quantity already filled in, provided the size is still in stock (the quantity is reduced to the available stock if necessary). The Payment page shall offer a way back to the Checkout page.
 
-**FR32 — Payment Page and Scope Limitation**  
-The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and total amount. Actual payment methods, payment processing and payment confirmation shall not be implemented in this version. Order placement and order status tracking are specified in Section 8; physical fulfilment (shipping, delivery) happens outside the system and is only recorded through order statuses (FR47).  
-- The Payment page shall state clearly that online payment is not available in this version and that no payment will be taken. It shall provide a **Place Order** button (FR41).  
+**FR32 — Payment Page**  
+The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and the total amount payable, with a **Place Order and Pay** button that places the order (FR41) and takes the customer to the payment provider (FR78). Physical fulfilment (shipping, delivery) happens outside the system and is only recorded through order statuses (FR47).  
+- While the mock payment provider is in use (FR84), the page shall state that payments are test payments and that no real money is charged.  
 - Visiting the Checkout or Payment page shall not create an order or change stock quantities or cart contents; only placing the order does (FR41).
 
 ## 6. Availability and Error Handling
@@ -202,8 +206,8 @@ The shop uses a single currency. All prices, subtotals and totals shall be displ
 **FR38 — Stock Reservation and Deduction**  
 Stock shall not be reserved when items are added to the cart, when Buy Now is used, or while the customer is on the Checkout or Payment page. Several customers may therefore hold the same item in their carts; availability is checked again at checkout (FR29) and when the order is placed (FR41). Stock quantities change only:  
 - when an administrator updates a product (FR10);  
-- when an order is placed — the ordered quantities are deducted (FR41);  
-- when an order is cancelled — the ordered quantities are added back (FR48).
+- when an order is placed — the ordered quantities are deducted and held for the order while it awaits payment (FR41, FR79);  
+- when an order is cancelled, by the customer, an administrator or because its payment deadline passed — the ordered quantities are added back (FR48, FR79).
 
 **FR39 — Initial Data**  
 On first start-up the system may create a set of demo products. Demo products shall be created only once: products deleted by an administrator shall not be re-created when the system is restarted.
@@ -215,16 +219,16 @@ All rules in this document that restrict input or actions (access control, produ
 
 **FR41 — Place Order**  
 The system shall allow customers to place an order from the Payment page, for both cart checkout and direct purchase.  
-- When the customer chooses **Place Order**, the server shall revalidate every item against the current stock and prices (FR29) and, if everything is valid, in **one indivisible operation**: deduct the ordered quantity from the stock of each product size, create the order with status **Placed** (FR47), and — for cart checkout — remove the ordered items from the cart. Direct purchase (Buy Now) shall not change the cart.  
+- When the customer chooses **Place Order**, the server shall revalidate every item against the current stock and prices (FR29) and, if everything is valid, in **one indivisible operation**: deduct the ordered quantity from the stock of each product size, create the order with status **Awaiting payment** and a payment deadline (FR47, FR79), and — for cart checkout — remove the ordered items from the cart. Direct purchase (Buy Now) shall not change the cart.  
 - Either all of this happens or none of it does. If any item is invalid, no order is created, no stock is changed, and the customer is shown the affected items (FR29).  
-- After a successful order, the customer shall be shown a confirmation page with the order number and the order details (FR45).  
-- Payment is not taken (FR32). The confirmation shall say that the order has been placed and that no payment has been charged.
+- After the order has been created, the customer shall be taken to the payment provider to pay (FR78). If the customer does not pay right away, the order stays in **My Orders** with a **Pay now** button until its payment deadline (FR79, FR80).  
+- The order becomes **Paid** only when the payment provider confirms the payment (FR78, FR81).
 
 **FR42 — Confirm the Amount Payable**  
 The order shall be created only for the total amount that was displayed to the customer when they chose **Place Order**. If the current total differs (for example because a price changed after the Payment page was opened), the order shall not be placed; the customer shall be told that prices have changed and shown the updated summary to confirm again.
 
 **FR43 — Prevent Duplicate Orders**  
-Submitting the same order more than once (for example by clicking **Place Order** twice, or a network retry) shall create only one order. A repeated submission shall lead to the confirmation of the order already placed. Opening the Payment page again later and placing a new order is a new order.
+Submitting the same order more than once (for example by clicking **Place Order** twice, or a network retry) shall create only one order. A repeated submission shall lead to the order already placed (and to its payment, if it is still awaiting payment). Opening the Payment page again later and placing a new order is a new order.
 
 **FR44 — Concurrent Orders**  
 Stock shall never become negative. When several customers order the same product size at the same time and the stock is not enough for all of them, only the orders that the remaining stock can satisfy shall be placed; the others shall fail with the message described in FR29.
@@ -235,31 +239,34 @@ Each order shall record: a unique order number, the customer, the date and time 
 - The order number is shown as `#` followed by six digits, e.g. `#000042`.
 
 **FR46 — Customer Order History**  
-The system shall provide a **My Orders** page listing the customer's orders, most recent first, showing for each order its number, date, status, number of items and total. Selecting an order shall open its detail page showing all information in FR45. A message shall be shown when the customer has no orders.
+The system shall provide a **My Orders** page listing the customer's orders, most recent first, showing for each order its number, date, status, number of items and total. Orders awaiting payment shall show the time left to pay (FR86). Selecting an order shall open its detail page showing all information in FR45. A message shall be shown when the customer has no orders.
 
 **FR47 — Order Statuses**  
-An order has one of the statuses **Placed**, **Shipped**, **Completed** or **Cancelled**. Only these changes are allowed:  
+An order has one of the statuses **Awaiting payment**, **Paid**, **Shipped**, **Completed** or **Cancelled**. Only these changes are allowed:  
 
-| From    | To        | Who                       |
-|---------|-----------|---------------------------|
-| Placed  | Shipped   | Administrator             |
-| Shipped | Completed | Administrator             |
-| Placed  | Cancelled | Administrator or the customer who placed the order |
+| From             | To        | Who |
+|------------------|-----------|-----|
+| Awaiting payment | Paid      | The system, when the payment provider confirms payment (FR78) |
+| Awaiting payment | Cancelled | The customer who placed the order, an administrator, or the system when the payment deadline passes (FR79) |
+| Paid             | Shipped   | Administrator |
+| Paid             | Cancelled | The customer who placed the order, or an administrator; the payment is refunded (FR82) |
+| Shipped          | Completed | Administrator |
 
-Any other change shall be rejected with a message. Every status change shall be recorded in the order's status history with the new status, the date and time, and who made the change; the history shall be shown on the order detail pages.
+Any other change shall be rejected with a message. Each change shall take effect only if the order is still in the expected status at that moment, so that two simultaneous changes (for example a payment confirmation and a cancellation) cannot both succeed. Every status change shall be recorded in the order's status history with the new status, the date and time, and who made the change (the customer, an administrator, or the system); the history shall be shown on the order detail pages.
 
 **FR48 — Cancel Order**  
-An order can be cancelled only while its status is **Placed** (FR47). The system shall ask for confirmation before cancelling.  
+An order can be cancelled only while its status is **Awaiting payment** or **Paid** (FR47). The system shall ask for confirmation before cancelling; for a paid order the confirmation shall say that the amount paid will be refunded.  
 - On cancellation the ordered quantities shall be added back to the stock of each product size, in the same indivisible operation as the status change.  
 - If a product has since been deleted, or the size is no longer offered, no stock is added back for that item; the cancellation still succeeds.  
+- Cancelling a paid order starts a full refund (FR82).  
 - Cancelled orders remain in the order history.
 
 **FR49 — Order Management (Administrator)**  
 The system shall provide an **Order Management** page for administrators that:  
 - lists all orders, most recent first, with order number, customer, date, status, number of items and total;  
 - can be filtered by status and searched by a keyword matched (case-insensitively) against the order number and the customer's username or display name, with a message when nothing matches;  
-- opens the details of an order (FR45) including the customer and status history;  
-- lets the administrator change the status as allowed by FR47, with a confirmation before cancelling.
+- opens the details of an order (FR45) including the customer, status history, payment attempts and refunds (FR83);  
+- lets the administrator change the status as allowed by FR47, with a confirmation before cancelling, and retry a failed refund (FR82).
 
 **FR50 — Order Access Control**  
 Customers shall be able to view and cancel only their own orders; an order that belongs to another customer shall be treated as not found. Administrators can view and manage all orders but cannot place orders. These rules shall be enforced by the server (FR40).
@@ -386,3 +393,52 @@ On every push and pull request, an automated pipeline shall run the code checks 
 
 **FR77 — Reproducible Builds**  
 Application dependencies shall be pinned to exact versions, and the container image shall be built from a pinned base image using only the repository and published package sources, so that the same commit produces an equivalent image.
+
+## 12. Payments
+
+**FR78 — Payment Flow**  
+- After placing an order (FR41), the customer is sent to a payment page hosted by the payment provider, showing the shop's name, the order number and the amount payable.  
+- The provider tells the shop the result in a signed notification sent directly from server to server (FR81). Only this notification can mark an order **Paid**; the customer returning to the shop's pages, or anything the browser sends, cannot.  
+- When the customer returns from the provider, the order page shows the result. If the notification has not arrived yet, the page shall say that the payment is being confirmed and update itself when it arrives.  
+- The shop shall never receive or store card details; they are entered only on the provider's page.
+
+**FR79 — Payment Deadline**  
+- An order awaiting payment has a payment deadline, **30 minutes** after it was placed by default (configurable, FR70).  
+- When the deadline has passed and the order is still awaiting payment, the system shall cancel it and return its items to stock within one minute, recording the system as the actor in the status history (FR47).  
+- The customer cannot start a payment after the deadline; the payment page offered by the provider shall expire at the same time.  
+- A payment confirmed while the order is still awaiting payment is accepted even if it arrives slightly after the deadline. A payment confirmed after the order has been cancelled shall be refunded automatically (FR82).
+
+**FR80 — Payment Attempts**  
+- If a payment fails or the customer leaves the provider's page without paying, the order stays awaiting payment, and the customer can try again with **Pay now** on the order page until the deadline.  
+- An unfinished payment page is reused when the customer tries again; a failed or abandoned one is replaced by a new attempt.  
+- An order can be paid only once. If a second payment for the same order is confirmed (for example, from another browser tab), it shall be refunded automatically.
+
+**FR81 — Payment Notifications**  
+- The shop shall accept payment notifications only when their signature is valid for the provider's secret key and their timestamp is no more than **5 minutes** old. Other notifications shall be rejected and logged as security events (FR59).  
+- Each notification shall be processed at most once, even if the provider sends it again or two copies arrive at the same time.  
+- The amount and currency in a payment confirmation must match the payment; otherwise the payment is treated as failed and the mismatch is logged.  
+- Notifications for unknown payments shall be acknowledged and logged but have no other effect.
+
+**FR82 — Refunds**  
+- Cancelling a paid order, and the cases in FR79 and FR80, shall start a refund of the full amount paid. The refund is recorded with status **Pending**, then **Refunded** or **Failed** depending on the provider's answer.  
+- A failed refund shall be shown to administrators on the order, with a **Retry refund** action. Customers see the refund status on their order.  
+- A payment shall never be refunded more than once.
+
+**FR83 — Payment Records**  
+For each order, the system shall keep every payment attempt (provider, provider reference, amount, status, reason for failure, time started, time paid) and every refund (amount, status, provider reference, reason for failure, times). Customers see the payments and refunds of their own orders; administrators see those of all orders.
+
+**FR84 — Mock Payment Provider**  
+- Until a real payment provider is connected, the system shall use a built-in **mock payment provider** that behaves like a real one — its own hosted payment page, deadline, signed notifications and refunds — but moves no money.  
+- Its payment page shall state clearly that it is a test payment and that no real money is charged, and shall let the user choose the outcome: **pay successfully**, **simulate a declined payment**, or **cancel and return to the shop**.  
+- The server shall log a warning at start-up while the mock provider is in use. It must be replaced by a real provider before the shop takes real orders.
+
+**FR85 — Payment Provider Interface**  
+Payment providers shall be connected through one interface — start a payment and get the provider's page address, check whether a started payment can still be used, verify and read a notification, and refund a payment — so that a real provider can be added without changing the order logic. The provider in use shall be chosen by configuration (FR70).
+
+**FR86 — Payment Status Display**  
+- An order awaiting payment shall show the time left to pay, counting down, and a **Pay now** button.  
+- The order detail pages shall show the payment status, the latest payment attempt and any refunds (FR83).  
+- The payment-related settings (provider, deadline, notification secret, currency) shall be configurable through environment variables (FR70).
+
+**FR87 — Orders from Earlier Versions**  
+Orders placed before payments were introduced (status **Placed**) shall be treated as **Paid**: they can be shipped, completed or cancelled as paid orders, but cancelling them starts no refund, because nothing was paid through the system.

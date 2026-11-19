@@ -12,4 +12,4 @@ ignore = [
 
 [lint.isort]
 known-first-party = ["app"]
-known-local-folder = ["conftest"]
+known-local-folder = ["conftest", "test_orders"]

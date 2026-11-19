@@ -113,3 +113,9 @@ def update_product(client, admin, product_id, **changes):
         **changes,
     }
     return client.put(f"/api/admin/products/{product_id}", json=body, headers=admin)
+
+
+def complete_mock_payment(client: TestClient, payment_url: str, outcome: str = "succeed"):
+    """Choose an outcome on the mock provider's page, as the customer would (FR84)."""
+    reference = payment_url.split("session=", 1)[1]
+    return client.post(f"/api/mock-provider/sessions/{reference}/complete", json={"outcome": outcome})

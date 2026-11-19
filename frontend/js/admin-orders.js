@@ -1,4 +1,4 @@
-/* Order Management page (FR47-FR49). */
+/* Order Management page (FR47-FR49, FR82, FR83). */
 
 (function () {
   if (!requireRole("admin")) return;
@@ -86,9 +86,13 @@
     document.getElementById("detail-body").innerHTML = `
       ${OrderView.meta(order, { showCustomer: true })}
       <div class="card mb-lg">${OrderView.items(order)}</div>
-      <h2>Status history</h2>
+      <h2>Payments and refunds</h2>
+      ${OrderView.payments(order)}
+      <h2 class="mt-md">Status history</h2>
       ${OrderView.history(order)}`;
-    detailActions.innerHTML = OrderView.actionButtons(order);
+    detailActions.innerHTML =
+      OrderView.actionButtons(order) +
+      (order.can_retry_refund ? '<button type="button" class="btn btn-secondary" data-action="retry-refund">Retry refund</button>' : "");
   }
 
   async function openOrder(id) {
@@ -108,7 +112,10 @@
     if (!(await OrderView.confirmAction(current, action))) return;
     button.disabled = true;
     try {
-      const updated = await api(`/api/admin/orders/${current.id}/status`, { method: "POST", json: { status: action } });
+      const updated =
+        action === "retry-refund"
+          ? await api(`/api/admin/orders/${current.id}/refunds/retry`, { method: "POST" })
+          : await api(`/api/admin/orders/${current.id}/status`, { method: "POST", json: { status: action } });
       toast(updated.message, "success");
       clearAlert(detailMessage);
       renderDetail(updated);
