@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 backend/data/
 backend/uploads/
+.env
+e2e/test-results/

@@ -1,13 +1,22 @@
-"""Login, logout and current-user endpoints (FR1-FR6)."""
+"""Login, logout and current-user endpoints (FR1-FR6, FR51, FR53, FR59)."""
 
-import sqlite3
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from ..database import get_db
-from ..security import create_session, get_current_user, verify_password
+from ..database import Database, Row, get_db
+from ..login_throttle import record_attempt, refusal_message, retry_after_seconds
+from ..security import (
+    clear_session_cookies,
+    client_ip,
+    create_session,
+    end_session,
+    get_current_user,
+    security_log,
+    set_session_cookies,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -21,7 +30,7 @@ class LoginRequest(BaseModel):
     role: Literal["admin", "customer"]
 
 
-def _user_payload(user: sqlite3.Row) -> dict:
+def _user_payload(user: Row) -> dict:
     return {
         "username": user["username"],
         "display_name": user["display_name"],
@@ -31,26 +40,48 @@ def _user_payload(user: sqlite3.Row) -> dict:
 
 
 @router.post("/login")
-def login(body: LoginRequest, request: Request, conn: sqlite3.Connection = Depends(get_db)):
-    user = conn.execute("SELECT * FROM users WHERE username = ?", (body.username.strip(),)).fetchone()
+def login(body: LoginRequest, request: Request, response: Response, conn: Database = Depends(get_db)):
+    settings = request.app.state.settings
+    username = body.username.strip()
+    ip = client_ip(request)
+
+    wait = retry_after_seconds(conn, username, ip)
+    if wait is not None:
+        # Refused attempts are not recorded, so they do not extend the wait (FR53).
+        security_log.warning("login_throttled user=%s ip=%s retry_after=%s", username, ip, wait)
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, refusal_message(wait), headers={"Retry-After": str(wait)})
+
+    user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     # A valid account used on the wrong login option is treated as invalid
     # credentials for that option.
     if user is None or not verify_password(body.password, user["password_hash"]) or user["role"] != body.role:
+        record_attempt(conn, username, ip, success=False)
+        security_log.warning("login_failed user=%s ip=%s role=%s", username, ip, body.role)
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             f"Invalid username or password for {ROLE_LABELS[body.role]} Login.",
         )
-    token = create_session(conn, user["id"], request.app.state.settings.token_ttl_hours)
-    return {"token": token, "user": _user_payload(user)}
+
+    record_attempt(conn, username, ip, success=True)
+    token, csrf = create_session(conn, user["id"], settings.token_ttl_hours)
+    set_session_cookies(response, settings, token, csrf)
+    security_log.info("login_succeeded user=%s ip=%s", username, ip)
+    return {"user": _user_payload(user)}
 
 
 @router.post("/logout")
-def logout(user: sqlite3.Row = Depends(get_current_user), conn: sqlite3.Connection = Depends(get_db)):
-    conn.execute("DELETE FROM sessions WHERE token = ?", (user["token"],))
-    conn.commit()
+def logout(
+    request: Request,
+    response: Response,
+    user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
+):
+    end_session(conn, user["token_hash"])
+    clear_session_cookies(response, request.app.state.settings)
+    security_log.info("logout user=%s ip=%s", user["username"], client_ip(request))
     return {"message": "You have been logged out."}
 
 
 @router.get("/me")
-def me(user: sqlite3.Row = Depends(get_current_user)):
+def me(user: Row = Depends(get_current_user)):
     return _user_payload(user)

@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Not the shop</title>
+<!-- Served from another origin by the e2e tests to check cross-site request protection (FR52). -->
+<form id="logout-form" method="POST"></form>
+<script>
+  const target = new URLSearchParams(location.search).get("target");
+  document.getElementById("logout-form").action = target + "/api/auth/logout";
+  fetch(target + "/api/cart/items", {
+    method: "POST", mode: "no-cors", credentials: "include",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ product_id: 1, size: "S", quantity: 1 }),
+  }).finally(() => (document.title = "fetch sent"));
+</script>

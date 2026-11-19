@@ -3,7 +3,19 @@
 const CURRENCY = "$";
 const SIZES = ["S", "M", "L", "XL"];
 const HOME_PAGES = { admin: "/admin.html", customer: "/shop.html" };
-const STORAGE_KEY = "onlineshop.session";
+// Only the user's name and role are kept in the browser for rendering the page; the session
+// itself lives in an HttpOnly cookie that scripts cannot read (FR51).
+const STORAGE_KEY = "onlineshop.user";
+const CSRF_COOKIE = "shop_csrf";
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+// Codes for 403 responses that are not about the user's role, so no redirect is wanted.
+const SECURITY_CHECK_CODES = ["csrf_failed", "origin_rejected"];
+
+try {
+  localStorage.removeItem("onlineshop.session"); // held a session token before rev. 4
+} catch {
+  /* Storage may be unavailable. */
+}
 
 class ApiError extends Error {
   constructor(message, status, data) {
@@ -15,28 +27,33 @@ class ApiError extends Error {
 }
 
 const Auth = {
-  load() {
+  get user() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
     } catch {
       return null;
     }
   },
-  save(token, user) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }));
+  save(user) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    } catch {
+      /* The server still knows who is logged in; only the header display is affected. */
+    }
   },
   clear() {
-    localStorage.removeItem(STORAGE_KEY);
-  },
-  get token() {
-    const session = this.load();
-    return session ? session.token : null;
-  },
-  get user() {
-    const session = this.load();
-    return session ? session.user : null;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* Nothing to clear. */
+    }
   },
 };
+
+function readCookie(name) {
+  const match = document.cookie.split("; ").find((part) => part.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
+}
 
 function goToLogin() {
   Auth.clear();
@@ -50,8 +67,8 @@ function goToLogin() {
  */
 async function api(path, { method = "GET", json, form, redirectOn401 = true } = {}) {
   const headers = {};
-  const token = Auth.token;
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // Anti-forgery token for state-changing requests (FR52).
+  if (!SAFE_METHODS.includes(method)) headers["X-CSRF-Token"] = readCookie(CSRF_COOKIE);
   let body;
   if (json !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -62,7 +79,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
 
   let response;
   try {
-    response = await fetch(path, { method, headers, body });
+    response = await fetch(path, { method, headers, body, credentials: "same-origin" });
   } catch {
     throw new ApiError("Cannot reach the server. Please check your connection and try again.", 0);
   }
@@ -79,7 +96,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
     if (response.status === 401 && redirectOn401) {
       goToLogin();
     }
-    if (response.status === 403) {
+    if (response.status === 403 && !SECURITY_CHECK_CODES.includes(data && data.code)) {
       const user = Auth.user;
       if (user && HOME_PAGES[user.role]) window.location.replace(HOME_PAGES[user.role]);
     }
@@ -91,7 +108,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
 /** Page guard: only users with `role` may stay on this page (FR5). */
 function requireRole(role) {
   const user = Auth.user;
-  if (!user || !Auth.token) {
+  if (!user) {
     goToLogin();
     return null;
   }
@@ -173,10 +190,14 @@ function renderHeader(active) {
 
   const links =
     user.role === "admin"
-      ? [{ id: "products", href: "/admin.html", label: "Product Management" }]
+      ? [
+          { id: "products", href: "/admin.html", label: "Product Management" },
+          { id: "orders", href: "/admin-orders.html", label: "Orders" },
+        ]
       : [
           { id: "shop", href: "/shop.html", label: "Products" },
           { id: "cart", href: "/cart.html", label: 'Cart <span class="badge hidden" id="cart-count">0</span>' },
+          { id: "orders", href: "/orders.html", label: "My Orders" },
         ];
 
   header.className = "site-header";
@@ -224,4 +245,92 @@ function parsePositiveInt(value) {
   if (!/^\d+$/.test(text)) return null;
   const n = Number(text);
   return n > 0 ? n : null;
+}
+
+function formatDateTime(iso) {
+  return iso ? new Date(iso).toLocaleString() : "—";
+}
+
+function statusBadge(order) {
+  return `<span class="status status-${escapeHtml(order.status)}">${escapeHtml(order.status_label)}</span>`;
+}
+
+/** A random id identifying one order submission, so a repeated click creates only one order (FR43). */
+function newRequestId() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Show a confirmation dialog. Resolves to true when the user confirms. */
+function confirmDialog({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="card modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="modal-header"><h2 id="confirm-title">${escapeHtml(title)}</h2></div>
+        <div class="modal-body"><p>${escapeHtml(message)}</p></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-answer="no">${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="btn ${danger ? "btn-danger" : ""}" data-answer="yes">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    function close(answer) {
+      document.removeEventListener("keydown", onKey);
+      backdrop.remove();
+      resolve(answer);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close(false);
+    }
+    backdrop.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-answer]");
+      if (button) close(button.dataset.answer === "yes");
+      else if (e.target === backdrop) close(false);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(backdrop);
+    backdrop.querySelector('[data-answer="yes"]').focus();
+  });
+}
+
+/**
+ * Render pagination for a list result ({page, pages, total, page_size}) into `container` (FR63).
+ * `onPage(n)` is called when the user picks a page; `noun` names the items, e.g. "products".
+ */
+function renderPagination(container, result, onPage, noun = "products") {
+  const { page, pages, total, page_size: size } = result;
+  const first = total ? (page - 1) * size + 1 : 0;
+  const last = Math.min(page * size, total);
+  const summary = total ? `Showing ${first}–${last} of ${total} ${noun}` : "";
+  if (pages <= 1) {
+    container.innerHTML = summary ? `<p class="pagination-summary">${summary}</p>` : "";
+    return;
+  }
+  const near = [];
+  for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) near.push(n);
+  const button = (n, label, aria, disabled = false) =>
+    `<button type="button" class="page-btn ${n === page && label === String(n) ? "current" : ""}" data-page="${n}"
+       aria-label="${aria}" ${disabled ? "disabled" : ""} ${n === page && label === String(n) ? 'aria-current="page"' : ""}>${label}</button>`;
+  container.innerHTML = `
+    <p class="pagination-summary">${summary}</p>
+    <nav class="pagination" aria-label="Pages">
+      ${button(1, "«", "First page", page === 1)}
+      ${button(page - 1, "‹", "Previous page", page === 1)}
+      ${near[0] > 1 ? '<span class="page-gap">…</span>' : ""}
+      ${near.map((n) => button(n, String(n), `Page ${n}`)).join("")}
+      ${near[near.length - 1] < pages ? '<span class="page-gap">…</span>' : ""}
+      ${button(page + 1, "›", "Next page", page === pages)}
+      ${button(pages, "»", "Last page", page === pages)}
+    </nav>`;
+  container.querySelector(".pagination").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-page]");
+    if (target && !target.disabled) onPage(Number(target.dataset.page));
+  });
+}
+
+/** Plain text with line breaks kept; markup is shown as text, never interpreted (FR61). */
+function formatDescription(text) {
+  return escapeHtml(text).replace(/\n/g, "<br>");
 }

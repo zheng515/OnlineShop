@@ -1,0 +1,132 @@
+# Continuous integration (FR76): code checks, tests on SQLite and PostgreSQL, browser tests,
+# and a container build that must start and report healthy. Make the "CI passed" job a
+# required status check in the branch protection settings so only green changes merge.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  checks:
+    name: Code checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - run: pip install -r backend/requirements-dev.txt -c backend/requirements.lock
+      - name: Python static checks
+        run: ruff check .
+      - name: JavaScript syntax
+        run: for file in frontend/js/*.js; do node --check "$file"; done
+      - name: Migrations match the schema
+        working-directory: backend
+        run: |
+          SHOP_DATABASE_URL=sqlite:///$RUNNER_TEMP/check.db python -m app.migrations upgrade
+          SHOP_DATABASE_URL=sqlite:///$RUNNER_TEMP/check.db python -m app.migrations check
+
+  tests:
+    name: Tests (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, postgresql]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: shop
+          POSTGRES_DB: shop_test
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shop -d shop_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SHOP_TEST_DATABASE_URL: ${{ matrix.database == 'postgresql' && 'postgresql://shop:shop@localhost:5432/shop_test' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - run: pip install -r backend/requirements-dev.txt -c backend/requirements.lock
+      - name: pytest
+        working-directory: backend
+        run: pytest -q
+
+  e2e:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.lock
+      - run: pip install -r e2e/requirements.txt -c backend/requirements.lock
+      - run: python -m playwright install --with-deps chromium
+      - name: pytest (Playwright)
+        working-directory: e2e
+        run: pytest -q --tracing retain-on-failure --output test-results
+      - name: Keep traces of failed tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: e2e/test-results
+          retention-days: 7
+
+  container:
+    name: Container build and start-up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t onlineshop:latest .
+      - name: Start app and PostgreSQL
+        run: |
+          echo "POSTGRES_PASSWORD=ci$(openssl rand -hex 12)" > .env
+          docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --no-build
+      - name: Wait until healthy
+        run: |
+          for attempt in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q app)")
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          docker compose ps
+          test "$status" = healthy
+          curl -fsS http://localhost:8000/api/health
+          curl -fsS http://localhost:8000/ | grep -q "Welcome to OnlineShop"
+      - name: Application logs
+        if: always()
+        run: docker compose logs app
+      - name: Stop
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v
+
+  passed:
+    name: CI passed
+    needs: [checks, tests, e2e, container]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "All checks passed."

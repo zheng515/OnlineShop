@@ -4,9 +4,9 @@ Prices are always taken from the current product record, never from the
 moment an item was added to the cart.
 """
 
-import sqlite3
 from dataclasses import dataclass
 
+from .database import Database
 from .products import format_cents, get_product
 
 
@@ -19,7 +19,7 @@ class Line:
     cart_item_id: int | None = None
 
 
-def evaluate_lines(conn: sqlite3.Connection, lines: list[Line]) -> dict:
+def evaluate_lines(conn: Database, lines: list[Line]) -> dict:
     items = []
     total_cents = 0
     for line in lines:
@@ -71,13 +71,14 @@ def evaluate_lines(conn: sqlite3.Connection, lines: list[Line]) -> dict:
         "items": items,
         "item_count": sum(item["quantity"] for item in items),
         "total": format_cents(total_cents),
+        "total_cents": total_cents,
         "empty": not items,
         "valid": bool(items) and not issues,
         "issues": issues,
     }
 
 
-def cart_lines(conn: sqlite3.Connection, user_id: int) -> list[Line]:
+def cart_lines(conn: Database, user_id: int) -> list[Line]:
     rows = conn.execute(
         "SELECT id, product_id, product_name, size, quantity FROM cart_items WHERE user_id = ? ORDER BY id",
         (user_id,),

@@ -1,0 +1,7 @@
+# Local trial with demo accounts over plain HTTP (never in production):
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+services:
+  app:
+    environment:
+      SHOP_SEED_DEMO_DATA: "1"
+      SHOP_COOKIE_SECURE: "0"

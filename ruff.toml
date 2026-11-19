@@ -1,0 +1,15 @@
+# Static checks for all Python code (FR75):  ruff check .
+line-length = 130
+target-version = "py312"
+extend-exclude = ["backend/data", "backend/uploads"]
+
+[lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, simplifications
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "B008",  # FastAPI declares dependencies as default arguments (Depends, File)
+]
+
+[lint.isort]
+known-first-party = ["app"]
+known-local-folder = ["conftest"]

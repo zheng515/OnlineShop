@@ -1,31 +1,42 @@
-"""Administrator product management (FR7-FR14)."""
+"""Administrator product management (FR7-FR14, FR60-FR65)."""
 
-import sqlite3
+from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, Field
 
-from ..database import get_db
+from ..database import Database, get_db, write_transaction
 from ..errors import ValidationProblem
-from ..images import ImageUploadError, delete_image, has_file, save_image
-from ..products import admin_view, get_product, list_products, validate_product_fields
+from ..images import ImageUploadError, delete_image, has_file, image_url, save_image
+from ..product_images import attach_images, cleanup_unattached, discard_files, record_upload
+from ..products import ADMIN_PAGE_SIZE, ProductData, admin_view, get_product, search_products, validate_product
 from ..security import require_admin, utcnow
+from .catalog import catalogue_query
 
-router = APIRouter(prefix="/api/admin/products", tags=["admin"], dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+
+ADMIN_SORTS = ("newest", "price_asc", "price_desc", "name", "stock_asc")
+
+
+class ProductIn(BaseModel):
+    # Loosely typed on purpose: validate_product reports every problem in plain words (FR13).
+    name: Any = ""
+    price: Any = ""
+    description: Any = ""
+    category_id: Any = None
+    stock: Any = Field(default_factory=dict)
+    image_ids: Any = Field(default_factory=list)
 
 
 def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Product not found. It may have been deleted.")
 
 
-async def _store_image(request: Request, image: UploadFile) -> str:
-    settings = request.app.state.settings
-    try:
-        return await save_image(image, settings.upload_dir, settings.max_image_bytes)
-    except ImageUploadError as exc:
-        raise ValidationProblem([str(exc)]) from exc
+def _validate(conn: Database, body: ProductIn, product_id: int | None = None) -> ProductData:
+    return validate_product(conn, **body.model_dump(), product_id=product_id)
 
 
-def _write_sizes(conn: sqlite3.Connection, product_id: int, sizes: dict[str, int]) -> None:
+def _write_sizes(conn: Database, product_id: int, sizes: dict[str, int]) -> None:
     conn.execute("DELETE FROM product_sizes WHERE product_id = ?", (product_id,))
     conn.executemany(
         "INSERT INTO product_sizes (product_id, size, stock) VALUES (?, ?, ?)",
@@ -33,95 +44,86 @@ def _write_sizes(conn: sqlite3.Connection, product_id: int, sizes: dict[str, int
     )
 
 
-@router.get("")
-def list_all(q: str = "", conn: sqlite3.Connection = Depends(get_db)):
-    products = [admin_view(p) for p in list_products(conn, q)]
-    return {"products": products, "count": len(products), "query": q}
+@router.post("/images", status_code=status.HTTP_201_CREATED)
+async def upload_image(request: Request, image: UploadFile | None = File(None), conn: Database = Depends(get_db)):
+    """Upload one image; it becomes part of a product when that product is saved (FR14)."""
+    settings = request.app.state.settings
+    if not has_file(image):
+        raise ValidationProblem(["Please choose an image file to upload."])
+    try:
+        file_name = await save_image(image, settings.upload_dir, settings.max_image_bytes)
+    except ImageUploadError as exc:
+        raise ValidationProblem([str(exc)]) from exc
+    try:
+        image_id = record_upload(conn, file_name)
+    except conn.Error:
+        delete_image(settings.upload_dir, file_name)
+        raise
+    cleanup_unattached(conn, settings.upload_dir)
+    return {"id": image_id, "url": image_url(file_name)}
 
 
-@router.get("/{product_id}")
-def detail(product_id: int, conn: sqlite3.Connection = Depends(get_db)):
+@router.get("/products")
+def list_all(
+    q: str = "",
+    category: str = "",
+    sort: str = "newest",
+    page: str = "1",
+    conn: Database = Depends(get_db),
+):
+    query = catalogue_query(q=q, category=category, sort=sort, page=page, allowed_sorts=ADMIN_SORTS, page_size=ADMIN_PAGE_SIZE)
+    result = search_products(conn, query)
+    result["products"] = [admin_view(p) for p in result["products"]]
+    return {**result, "count": result["total"], "query": q}
+
+
+@router.get("/products/{product_id}")
+def detail(product_id: int, conn: Database = Depends(get_db)):
     product = get_product(conn, product_id)
     if product is None:
         raise _not_found()
     return admin_view(product)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
-async def create(
-    request: Request,
-    name: str = Form(""),
-    price: str = Form(""),
-    stock: str = Form(""),
-    image: UploadFile | None = File(None),
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    errors: list[str] = []
-    try:
-        clean_name, price_cents, sizes = validate_product_fields(name, price, stock)
-    except ValidationProblem as problem:
-        errors.extend(problem.errors)
-    if not has_file(image):
-        errors.append("Product image is required.")
-    if errors:
-        raise ValidationProblem(errors)
-
-    file_name = await _store_image(request, image)
+@router.post("/products", status_code=status.HTTP_201_CREATED)
+def create(body: ProductIn, conn: Database = Depends(get_db)):
+    data = _validate(conn, body)
     now = utcnow().isoformat()
-    try:
-        cursor = conn.execute(
-            "INSERT INTO products (name, price_cents, image, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (clean_name, price_cents, file_name, now, now),
+    with write_transaction(conn):
+        product_id = conn.insert(
+            """INSERT INTO products (name, price_cents, image, description, category_id, created_at, updated_at)
+               VALUES (?, ?, '', ?, ?, ?, ?)""",
+            (data.name, data.price_cents, data.description, data.category_id, now, now),
         )
-        _write_sizes(conn, cursor.lastrowid, sizes)
-        conn.commit()
-    except sqlite3.Error:
-        conn.rollback()
-        delete_image(request.app.state.settings.upload_dir, file_name)
-        raise
-    return admin_view(get_product(conn, cursor.lastrowid))
-
-
-@router.put("/{product_id}")
-async def update(
-    product_id: int,
-    request: Request,
-    name: str = Form(""),
-    price: str = Form(""),
-    stock: str = Form(""),
-    image: UploadFile | None = File(None),
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    existing = get_product(conn, product_id)
-    if existing is None:
-        raise _not_found()
-    clean_name, price_cents, sizes = validate_product_fields(name, price, stock)
-
-    upload_dir = request.app.state.settings.upload_dir
-    new_file = await _store_image(request, image) if has_file(image) else None
-    try:
-        conn.execute(
-            "UPDATE products SET name = ?, price_cents = ?, image = ?, updated_at = ? WHERE id = ?",
-            (clean_name, price_cents, new_file or existing["image"], utcnow().isoformat(), product_id),
-        )
-        _write_sizes(conn, product_id, sizes)
-        conn.commit()
-    except sqlite3.Error:
-        conn.rollback()
-        if new_file:
-            delete_image(upload_dir, new_file)
-        raise
-    if new_file:
-        delete_image(upload_dir, existing["image"])
+        _write_sizes(conn, product_id, data.sizes)
+        attach_images(conn, product_id, data.image_ids)
     return admin_view(get_product(conn, product_id))
 
 
-@router.delete("/{product_id}")
-def delete(product_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+@router.put("/products/{product_id}")
+def update(product_id: int, body: ProductIn, request: Request, conn: Database = Depends(get_db)):
+    if get_product(conn, product_id) is None:
+        raise _not_found()
+    data = _validate(conn, body, product_id)
+    with write_transaction(conn):
+        conn.execute(
+            """UPDATE products SET name = ?, price_cents = ?, description = ?, category_id = ?, updated_at = ?
+               WHERE id = ?""",
+            (data.name, data.price_cents, data.description, data.category_id, utcnow().isoformat(), product_id),
+        )
+        _write_sizes(conn, product_id, data.sizes)
+        removed = attach_images(conn, product_id, data.image_ids)
+    # Only after the save succeeded, so a failed save keeps the previous images (FR14).
+    discard_files(conn, request.app.state.settings.upload_dir, removed)
+    return admin_view(get_product(conn, product_id))
+
+
+@router.delete("/products/{product_id}")
+def delete(product_id: int, request: Request, conn: Database = Depends(get_db)):
     existing = get_product(conn, product_id)
     if existing is None:
         raise _not_found()
     conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
     conn.commit()
-    delete_image(request.app.state.settings.upload_dir, existing["image"])
+    discard_files(conn, request.app.state.settings.upload_dir, [image["file"] for image in existing["images"]])
     return {"message": f"\"{existing['name']}\" has been deleted."}

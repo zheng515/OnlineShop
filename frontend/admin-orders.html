@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Management · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-head">
+      <h1>Order Management</h1>
+    </div>
+
+    <form class="filter-bar" id="filter-form" role="search">
+      <select id="status-filter" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option value="placed">Placed</option>
+        <option value="shipped">Shipped</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <div class="search-bar">
+        <input type="search" id="search-input" placeholder="Order number or customer…" aria-label="Search orders">
+        <button type="submit" class="btn">Search</button>
+        <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
+      </div>
+    </form>
+
+    <div id="list-message" class="hidden"></div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th class="hide-sm">Date</th>
+              <th>Status</th>
+              <th class="stock-cell hide-sm">Items</th>
+              <th class="text-right">Total</th>
+              <th class="hide-sm"></th>
+            </tr>
+          </thead>
+          <tbody id="order-rows">
+            <tr><td colspan="7" class="loading">Loading orders…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <div class="modal-backdrop hidden" id="detail-modal">
+    <div class="card modal modal-lg">
+      <div class="modal-header">
+        <h2 id="detail-title">Order</h2>
+        <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="detail-message" class="hidden" role="alert"></div>
+        <div id="detail-body"></div>
+      </div>
+      <div class="modal-footer">
+        <div class="order-actions" id="detail-actions"></div>
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/order-view.js"></script>
+  <script src="/js/admin-orders.js"></script>
+</body>
+</html>

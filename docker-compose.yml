@@ -1,0 +1,43 @@
+# Application + PostgreSQL (FR71).  Start with:
+#   cp .env.example .env   # then set POSTGRES_PASSWORD
+#   docker compose up -d --build
+# Put an HTTPS reverse proxy in front of port 8000 in production (FR56).
+services:
+  db:
+    image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      # UTF-8 locale so lower() folds non-English letters (FR16, FR68).
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build: .
+    image: onlineshop:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SHOP_DATABASE_URL: postgresql://shop:${POSTGRES_PASSWORD}@db:5432/shop
+      SHOP_SEED_DEMO_DATA: ${SHOP_SEED_DEMO_DATA:-0}
+      SHOP_COOKIE_SECURE: ${SHOP_COOKIE_SECURE:-1}
+      # Address of the reverse proxy whose X-Forwarded-For header is trusted for client IPs (FR53).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+    ports:
+      - "${SHOP_PORT:-8000}:8000"
+    volumes:
+      - uploads:/data/uploads
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  uploads:

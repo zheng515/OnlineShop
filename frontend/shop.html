@@ -11,17 +11,60 @@
 
   <main class="container">
     <div class="page-head">
-      <h1>Products</h1>
+      <h1 id="page-title">Products</h1>
       <form class="search-bar" id="search-form" role="search">
-        <input type="search" id="search-input" placeholder="Search products by name…" aria-label="Search products">
+        <input type="search" id="search-input" placeholder="Search name or description…" aria-label="Search products">
         <button type="submit" class="btn">Search</button>
-        <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
       </form>
     </div>
 
-    <div id="search-message" class="hidden"></div>
-    <div class="product-grid" id="product-grid">
-      <div class="loading">Loading products…</div>
+    <div class="catalog-layout">
+      <details class="card filters" id="filters" open>
+        <summary class="hidden" id="filters-summary">Filters</summary>
+        <div class="filter-group">
+          <h2>Category</h2>
+          <ul class="category-list" id="category-list"></ul>
+        </div>
+        <form class="filter-group" id="price-form" novalidate>
+          <h2>Price (<span class="currency"></span>)</h2>
+          <div class="price-range">
+            <input type="text" inputmode="decimal" id="min-price" placeholder="Min" aria-label="Minimum price">
+            <span class="muted">–</span>
+            <input type="text" inputmode="decimal" id="max-price" placeholder="Max" aria-label="Maximum price">
+          </div>
+          <button type="submit" class="btn btn-secondary btn-sm btn-block mt-sm">Apply price</button>
+        </form>
+        <div class="filter-group">
+          <h2><label for="size-filter">Size in stock</label></h2>
+          <select id="size-filter">
+            <option value="">Any size</option>
+            <option value="S">S</option><option value="M">M</option><option value="L">L</option><option value="XL">XL</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="check-row"><input type="checkbox" id="in-stock-filter"> In stock only</label>
+        </div>
+      </details>
+
+      <section>
+        <div class="list-toolbar">
+          <span class="muted" id="result-count"></span>
+          <label class="check-row">Sort by
+            <select id="sort-select">
+              <option value="newest">Newest</option>
+              <option value="price_asc">Price: low to high</option>
+              <option value="price_desc">Price: high to low</option>
+              <option value="name">Name: A to Z</option>
+            </select>
+          </label>
+        </div>
+        <div class="active-filters" id="active-filters"></div>
+        <div id="search-message" class="hidden"></div>
+        <div class="product-grid" id="product-grid">
+          <div class="loading">Loading products…</div>
+        </div>
+        <div id="pagination"></div>
+      </section>
     </div>
   </main>
 

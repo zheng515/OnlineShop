@@ -1,6 +1,5 @@
-import json
 
-from conftest import create_product
+from conftest import create_product, update_product
 
 
 def test_browse_and_case_insensitive_search(client, admin, customer):
@@ -70,7 +69,7 @@ def test_cart_is_per_customer(client, admin, customer):
 
     product = create_product(client, admin).json()
     cart = client.post("/api/cart/items", json={"product_id": product["id"], "size": "S", "quantity": 1}, headers=customer).json()
-    bob = login(client, "bob", "bob123", "customer")
+    bob = login(client, "bob", "bob12345", "customer")
     assert client.get("/api/cart", headers=bob).json()["empty"] is True
     assert client.delete(f"/api/cart/items/{cart['items'][0]['id']}", headers=bob).status_code == 404
 
@@ -84,11 +83,7 @@ def test_empty_cart_cannot_checkout(client, customer):
 def test_checkout_uses_current_price(client, admin, customer):
     product = create_product(client, admin, price="10", stock={"S": 5}).json()
     client.post("/api/cart/items", json={"product_id": product["id"], "size": "S", "quantity": 2}, headers=customer)
-    client.put(
-        f"/api/admin/products/{product['id']}",
-        data={"name": product["name"], "price": "7.25", "stock": json.dumps({"S": 5})},
-        headers=admin,
-    )
+    update_product(client, admin, product["id"], price="7.25")
     summary = client.post("/api/checkout", json={"source": "cart"}, headers=customer).json()
     assert summary["valid"] is True
     assert summary["items"][0]["unit_price"] == 7.25
@@ -98,11 +93,7 @@ def test_checkout_uses_current_price(client, admin, customer):
 def test_checkout_revalidates_stock(client, admin, customer):
     product = create_product(client, admin, stock={"S": 5}).json()
     client.post("/api/cart/items", json={"product_id": product["id"], "size": "S", "quantity": 4}, headers=customer)
-    client.put(
-        f"/api/admin/products/{product['id']}",
-        data={"name": product["name"], "price": "10", "stock": json.dumps({"S": 2})},
-        headers=admin,
-    )
+    update_product(client, admin, product["id"], stock={"S": 2})
     summary = client.post("/api/checkout", json={"source": "cart"}, headers=customer).json()
     assert summary["valid"] is False
     assert summary["items"][0]["status"] == "insufficient_stock"

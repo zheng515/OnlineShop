@@ -10,6 +10,7 @@
 
   let product = null;
   let selectedSize = null;
+  let activeImage = 0;
 
   // Returning from checkout restores the previous selection (FR31).
   const initialSize = queryParam("size");
@@ -43,12 +44,31 @@
 
   function render(quantity) {
     const anyInStock = product.sizes.some((s) => s.stock > 0);
+    const images = product.images.length ? product.images : [product.image_url];
+    activeImage = Math.min(activeImage, images.length - 1);
+    const thumbs =
+      images.length > 1
+        ? `<div class="thumbs" id="thumbs">${images
+            .map(
+              (url, index) => `<button type="button" data-index="${index}" class="${index === activeImage ? "active" : ""}"
+                 aria-label="Show image ${index + 1} of ${images.length}"><img src="${escapeHtml(url)}" alt=""></button>`
+            )
+            .join("")}</div>`
+        : "";
+    const category = product.category
+      ? `<a href="/shop.html?category=${product.category.id}">${escapeHtml(product.category.name)}</a> ›`
+      : "";
     container.innerHTML = `
+      <nav class="breadcrumb" aria-label="Breadcrumb"><a href="/shop.html">Products</a> › ${category} ${escapeHtml(product.name)}</nav>
       <div class="detail">
-        <div class="card gallery"><img src="${escapeHtml(product.image_url)}" alt="${escapeHtml(product.name)}"></div>
+        <div class="card gallery">
+          <img id="main-image" src="${escapeHtml(images[activeImage])}" alt="${escapeHtml(product.name)}">
+          ${thumbs}
+        </div>
         <div>
           <h1>${escapeHtml(product.name)}</h1>
           <div class="price">${formatPrice(product.price)}</div>
+          ${product.description ? `<p class="description">${formatDescription(product.description)}</p>` : ""}
 
           <label>Size</label>
           <div class="size-options" id="size-options">${SIZES.map(sizeButton).join("")}</div>
@@ -61,13 +81,13 @@
           </div>
           <div class="field-hint" id="qty-hint"></div>
 
-          <div id="action-message" class="hidden" role="alert" style="margin-top: 1rem"></div>
+          <div id="action-message" class="hidden" role="alert"></div>
 
           <div class="purchase-actions">
             <button type="button" class="btn btn-secondary btn-lg" id="add-cart-btn">Add to Cart</button>
             <button type="button" class="btn btn-lg" id="buy-now-btn">Buy Now</button>
           </div>
-          ${anyInStock ? "" : '<div class="alert alert-warning" style="margin-top:1rem">This product is currently out of stock in all sizes.</div>'}
+          ${anyInStock ? "" : '<div class="alert alert-warning mt-md">This product is currently out of stock in all sizes.</div>'}
         </div>
       </div>`;
     bindEvents();
@@ -95,6 +115,16 @@
   }
 
   function bindEvents() {
+    const thumbs = el("thumbs");
+    if (thumbs) {
+      thumbs.addEventListener("click", (e) => {
+        const button = e.target.closest("[data-index]");
+        if (!button) return;
+        activeImage = Number(button.dataset.index);
+        el("main-image").src = product.images[activeImage];
+        thumbs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b === button));
+      });
+    }
     el("size-options").addEventListener("click", (e) => {
       const button = e.target.closest(".size-option");
       if (!button || button.disabled) return;

@@ -41,7 +41,7 @@
           <button type="button" class="btn btn-lg btn-block" id="continue-btn" ${summary.valid ? "" : "disabled"}>
             Continue to Payment
           </button>
-          <a class="btn btn-secondary btn-block" style="margin-top: 0.5rem" href="${back.href}">${back.label}</a>
+          <a class="btn btn-secondary btn-block mt-sm" href="${back.href}">${back.label}</a>
           <p class="field-hint">Prices reflect the current product prices.</p>
         </aside>
       </div>`;
