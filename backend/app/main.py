@@ -3,6 +3,8 @@
 Run from the backend directory with:  uvicorn app.main:app --reload
 """
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,8 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .database import close_pools, connect
 from .errors import install_error_handlers
+from .jobs import run_forever
 from .migrations import prepare_database
-from .routers import admin_orders, admin_products, auth, catalog, health, orders, shop
+from .routers import admin_orders, admin_products, auth, catalog, health, orders, payments, shop
 from .seed import accounts_with_demo_passwords, seed
 from .web_security import install_web_security
 
@@ -47,7 +50,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         finally:
             conn.close()
+        if settings.payment_provider == "mock":
+            logging.getLogger("onlineshop.payments").warning(
+                "The mock payment provider is in use: payments are simulated and no money is charged (FR84)."
+            )
+        jobs = asyncio.create_task(run_forever(settings)) if settings.job_interval_seconds > 0 else None
         yield
+        if jobs:
+            jobs.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await jobs
         close_pools()
 
     app = FastAPI(title="OnlineShop", version="1.0.0", lifespan=lifespan)
@@ -61,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(catalog.router)
     app.include_router(shop.router)
     app.include_router(orders.router)
+    app.include_router(payments.router)
     app.include_router(admin_orders.router)
 
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")

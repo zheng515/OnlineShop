@@ -85,10 +85,11 @@ They fail on any JavaScript error or Content Security Policy violation. Set
 | `product.html`  | customer      | Image gallery, description, category, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33, FR62) |
 | `cart.html`     | customer      | Cart with quantity updates, removal, live prices, warnings (FR21–FR26, FR30, FR34) |
 | `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation (FR28–FR31) |
-| `payment.html`  | customer      | Order summary, amount payable and **Place Order**; payment itself is out of scope (FR32, FR41–FR43) |
-| `orders.html`   | customer      | My Orders: order history (FR46) |
-| `order.html`    | customer      | Order details, confirmation after placing, cancellation (FR45, FR47, FR48) |
-| `admin-orders.html` | administrator | Order Management: list, filter, search, details, status changes (FR47–FR49) |
+| `payment.html`  | customer      | Order summary, amount payable and **Place Order and Pay** (FR32, FR41–FR43) |
+| `mock-pay.html` | anyone with the link | The mock payment provider's own page (FR84) |
+| `orders.html`   | customer      | My Orders: order history, time left to pay (FR46, FR86) |
+| `order.html`    | customer      | Order details, payment result, **Pay now** with countdown, payments and refunds, cancellation (FR45–FR48, FR78–FR86) |
+| `admin-orders.html` | administrator | Order Management: list, filter, search, details, payments and refunds, status changes, refund retry (FR47–FR49, FR82) |
 
 Every page checks the user's role and the API enforces it again (FR5); all pages have a Log out button (FR6).
 
@@ -121,9 +122,52 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   customer saw; a repeated submission (double click, retry) returns the order already placed.
 - **Order records (FR45):** items store the name, image, size and price at order time, so later
   product edits or deletion do not change past orders; images used by orders are kept.
-- **Statuses (FR47, FR48):** Placed → Shipped → Completed, or Placed → Cancelled (by the customer
-  or an administrator), which returns the items to stock. Every change is kept in the status history.
-- **Payment (FR32):** still out of scope — orders are placed without taking any payment.
+- **Statuses (FR47, FR48):** Awaiting payment → Paid → Shipped → Completed. An order can be
+  cancelled while awaiting payment (by the customer, an administrator, or the payment deadline) or
+  once paid (by the customer or an administrator, with a full refund); the items go back to stock.
+  Every change is a guarded `UPDATE … WHERE status = <expected>`, so two simultaneous changes cannot
+  both succeed, and every change is kept in the status history.
+
+## Payments (SRS Section 12)
+
+Placing an order holds its items and sends the customer to the payment provider's page. The order
+becomes **Paid** only when the provider's signed notification confirms the payment; returning to
+the shop proves nothing. Unpaid orders are cancelled 30 minutes after they were placed, and their
+items go back to stock.
+
+```
+Place Order and Pay ─▶ order "Awaiting payment" (stock held, deadline set)
+        │
+        ▼
+provider page ── declined / left ──▶ back to the order: "Pay now" until the deadline
+        │ paid
+        ▼
+signed notification ─▶ verified, processed once ─▶ order "Paid"
+                                     └─ order already cancelled or paid ─▶ automatic refund
+```
+
+- **Mock provider (FR84):** `SHOP_PAYMENT_PROVIDER=mock` (the only provider so far) is a built-in
+  stand-in with its own page (`mock-pay.html`), sessions that expire with the order, signed
+  notifications and refunds. It moves no money; its page and the shop's payment page say so, and the
+  server logs a warning at start-up. On its page you choose to pay, to simulate a declined payment,
+  or to cancel. It delivers its notification by calling the same handler that
+  `POST /api/payments/webhooks/mock` uses.
+- **Notifications (FR81):** HMAC-SHA256 signature over `"<timestamp>.<body>"` with
+  `SHOP_PAYMENT_WEBHOOK_SECRET`, rejected if older than 5 minutes, processed once per event id
+  (also when copies arrive at the same time), and the amount and currency must match.
+- **Deadline (FR79):** every server worker runs a job every `SHOP_JOB_INTERVAL_SECONDS` that cancels
+  overdue orders, and opening an overdue order cancels it at once. `python -m app.jobs` does the
+  same from cron. A payment confirmed after cancellation is refunded automatically, and so is a second
+  payment for an order that is already paid.
+- **Refunds (FR82):** cancelling a paid order refunds it in full. A refund the provider rejects is
+  shown to administrators with **Retry refund**; a payment can never be refunded twice (unique
+  constraint).
+- **Adding a real provider (FR85):** implement the `PaymentProvider` interface in
+  `app/payments/provider.py` (start a payment, page URL, is it still usable, parse and verify a
+  notification, refund), return it from `get_provider`, and set the provider's secret in
+  `SHOP_PAYMENT_WEBHOOK_SECRET`. The order logic in `app/payments/service.py` stays the same.
+- **Earlier orders (FR87):** orders with the old status *Placed* became *Paid* in migration 0002;
+  cancelling them refunds nothing, because nothing was paid through the shop.
 
 ## Deployment (SRS Section 11)
 
@@ -160,6 +204,11 @@ the login throttle sees real client addresses rather than the proxy's.
 | `SHOP_COOKIE_SECURE` | `0` (container: `1`) | `Secure` cookies and HSTS; required over HTTPS (FR56) |
 | `SHOP_AUTO_MIGRATE` | `1` (container: `0`) | Apply migrations at start-up; when `0` the server refuses an outdated schema |
 | `SHOP_TOKEN_TTL_HOURS` | `8` | Session lifetime (FR36) |
+| `SHOP_PAYMENT_PROVIDER` | `mock` | Payment provider (FR85); `mock` moves no money (FR84) |
+| `SHOP_PAYMENT_TIMEOUT_MINUTES` | `30` | Time to pay before an order is cancelled (FR79) |
+| `SHOP_PAYMENT_WEBHOOK_SECRET` | random per start | Secret for verifying payment notifications (FR81); set it to the provider's value with a real provider |
+| `SHOP_CURRENCY` | `USD` | Currency sent to the payment provider |
+| `SHOP_JOB_INTERVAL_SECONDS` | `60` | How often overdue unpaid orders are cancelled; `0` turns the job off |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxy addresses whose `X-Forwarded-For` uvicorn trusts |
 
 ### Schema migrations (FR69)
@@ -250,10 +299,12 @@ backend/
     products.py          catalogue queries (search, filters, sorting, pages) and validation
     product_images.py    staged image uploads, attaching to products, cleanup
     orders.py            cart / checkout pricing and stock evaluation
-    order_service.py     order placement, cancellation, status changes
+    order_service.py     order placement, statuses, cancellation, refund records
+    payments/            provider interface, mock provider, payment service (notifications, refunds, deadline)
+    jobs.py              background job: cancel orders whose payment deadline passed
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, admin_products, admin_orders, catalog (categories), health, shop, orders
+    routers/             auth, admin_products, admin_orders, catalog (categories), health, shop, orders, payments
   migrations/            Alembic environment and numbered migration scripts
   tests/                 pytest suite (SQLite and PostgreSQL)
   requirements*.txt      pinned dependencies; requirements.lock pins everything (FR77)

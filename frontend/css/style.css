@@ -274,8 +274,6 @@ tr.has-issue td { background: #fffafa; }
   display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 999px;
   white-space: nowrap;
 }
-.status-placed { background: var(--primary-soft); color: var(--primary); }
-.status-shipped { background: var(--warning-soft); color: var(--warning); }
 .status-completed { background: var(--success-soft); color: var(--success); }
 .status-cancelled { background: #f3f4f6; color: var(--muted); }
 .order-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
@@ -365,6 +363,31 @@ textarea { resize: vertical; min-height: 5rem; }
 .category-rows { list-style: none; margin: 0 0 1rem; padding: 0; }
 .category-rows input { flex: 1; }
 .category-rows .count { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+
+/* ---------- Payments ---------- */
+.status-awaiting_payment { background: var(--warning-soft); color: var(--warning); }
+.status-paid { background: var(--primary-soft); color: var(--primary); }
+.status-shipped { background: #f5f3ff; color: #6d28d9; }
+.countdown { font-variant-numeric: tabular-nums; font-weight: 700; }
+.pay-box { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.pay-box .btn { min-width: 12rem; }
+.payment-list { list-style: none; margin: 0; padding: 0; font-size: 0.9rem; }
+.payment-list li { padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+.payment-list li:last-child { border-bottom: none; }
+.payment-list .ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: var(--muted); word-break: break-all; }
+
+/* Mock provider page: deliberately unlike the shop, as a provider's own site would be. */
+body.mockpay { background: #eef2f7; }
+.mockpay-banner { background: #92400e; color: #fff; text-align: center; padding: 0.55rem 1rem; font-weight: 600; font-size: 0.88rem; }
+.mockpay-main { max-width: 420px; margin: 2.5rem auto; padding: 0 1rem; }
+.mockpay-brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; font-size: 1.25rem; margin-bottom: 1rem; color: #0f172a; }
+.mockpay-logo {
+  width: 32px; height: 32px; border-radius: 50%; background: #0f172a; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.mockpay-card .detail-list { margin-bottom: 1.25rem; }
+.mockpay-amount { font-size: 2rem; font-weight: 700; margin: 0.25rem 0 1rem; }
+.mockpay-footer { text-align: center; font-size: 0.8rem; color: var(--muted); margin-top: 1rem; }
 
 .loading { text-align: center; padding: 2.5rem; color: var(--muted); }
 

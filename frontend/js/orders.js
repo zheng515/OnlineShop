@@ -1,4 +1,4 @@
-/* Customer order history (FR46). */
+/* Customer order history, with the time left to pay (FR46, FR86). */
 
 (function () {
   if (!requireRole("customer")) return;
@@ -31,7 +31,11 @@
                 <tr class="clickable" data-id="${o.id}">
                   <td><a href="/order.html?id=${o.id}" class="item-name">${escapeHtml(o.number)}</a></td>
                   <td class="nowrap">${formatDateTime(o.created_at)}</td>
-                  <td>${statusBadge(o)}</td>
+                  <td>${statusBadge(o)}${
+                    o.status === "awaiting_payment"
+                      ? `<div class="item-size">Pay within ${Math.ceil(o.seconds_left / 60)} min</div>`
+                      : ""
+                  }</td>
                   <td class="stock-cell">${o.item_count}</td>
                   <td class="nowrap text-right"><strong>${formatPrice(o.total)}</strong></td>
                 </tr>`

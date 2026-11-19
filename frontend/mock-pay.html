@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MockPay · Test payment</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="mockpay">
+  <!-- Stands in for a payment provider's hosted page (FR84). With a real provider this page is on
+       the provider's website, not the shop's. -->
+  <div class="mockpay-banner" role="note">TEST MODE — this is a simulated payment. No real money is charged.</div>
+  <main class="mockpay-main">
+    <div class="mockpay-brand"><span class="mockpay-logo">M</span> MockPay</div>
+    <div class="card mockpay-card">
+      <div class="card-body" id="mockpay-content"><div class="loading">Loading payment…</div></div>
+    </div>
+    <p class="mockpay-footer">MockPay is a stand-in for a real payment provider, used for development and demonstrations.</p>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/mock-pay.js"></script>
+</body>
+</html>
