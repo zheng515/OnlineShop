@@ -8,7 +8,7 @@ from ..config import SIZES
 from ..database import Database, get_db
 from ..errors import ValidationProblem
 from ..products import CUSTOMER_PAGE_SIZE, CUSTOMER_SORTS, CatalogueQuery, parse_amount
-from ..security import get_current_user, require_admin, utcnow
+from ..security import optional_user, require_admin, utcnow
 
 MAX_CATEGORY_NAME = 50
 
@@ -80,9 +80,9 @@ def _categories(conn: Database, non_empty_only: bool) -> list[dict]:
 
 
 @router.get("/categories")
-def list_categories(user=Depends(get_current_user), conn: Database = Depends(get_db)):
-    # Customers only see categories they can actually browse (FR60).
-    categories = _categories(conn, non_empty_only=user["role"] != "admin")
+def list_categories(user=Depends(optional_user), conn: Database = Depends(get_db)):
+    # Customers and visitors only see categories they can actually browse (FR60, FR88).
+    categories = _categories(conn, non_empty_only=not user or user["role"] != "admin")
     return {"categories": categories}
 
 

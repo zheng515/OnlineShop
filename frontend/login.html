@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="login-page">
+    <div class="card login-card">
+      <div class="card-body">
+        <div class="login-title">
+          <div class="logo">OS</div>
+          <h1>Welcome to OnlineShop</h1>
+          <p class="muted">Choose how you want to sign in</p>
+        </div>
+
+        <div class="role-tabs" role="tablist">
+          <button type="button" class="role-tab" data-role="admin" role="tab">
+            <span class="icon">🛠️</span><strong>Administrator Login</strong>
+          </button>
+          <button type="button" class="role-tab active" data-role="customer" role="tab">
+            <span class="icon">🛍️</span><strong>Customer Login</strong>
+          </button>
+        </div>
+
+        <form id="login-form" novalidate>
+          <div id="login-error" class="hidden" role="alert"></div>
+          <div class="field">
+            <label for="username">Username or email</label>
+            <input type="text" id="username" autocomplete="username" required>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input type="password" id="password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" class="btn btn-lg btn-block" id="login-btn">Log in as Customer</button>
+        </form>
+        <div id="resend-box" class="hidden mt-md">
+          <button type="button" class="btn btn-secondary btn-block" id="resend-btn">Send the confirmation email again</button>
+        </div>
+        <div class="login-links">
+          <a href="/forgot-password.html">Forgot your password?</a>
+          <span>New customer? <a href="/register.html">Create an account</a></span>
+          <a href="/shop.html">Browse the shop without logging in</a>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/login.js"></script>
+</body>
+</html>

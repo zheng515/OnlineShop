@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from .database import Database, Row, write_transaction
 from .errors import ValidationProblem
 from .images import image_url
+from .notifications import order_event
 from .orders import Line, cart_lines, evaluate_lines
 from .products import format_cents, get_product
 from .security import utcnow
@@ -150,6 +151,7 @@ def _place_order(
             )
 
         _record_event(conn, order_id, "awaiting_payment", customer, now)
+        order_event(conn, order_id, "awaiting_payment", customer)
         if source == "cart":
             conn.executemany("DELETE FROM cart_items WHERE id = ?", [(line.cart_item_id,) for line in lines])
     return order_id, True
@@ -216,6 +218,7 @@ def apply_transition(
         # Orders from before payments have no payments, so nothing is refunded (FR87).
         refund_ids = create_refunds(conn, order_id, "Order cancelled", now)
     _record_event(conn, order_id, new_status, actor, now)
+    order_event(conn, order_id, new_status, actor, refunding=bool(refund_ids))
     return refund_ids
 
 

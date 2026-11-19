@@ -26,6 +26,7 @@ RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin shop 
 ENV SHOP_FRONTEND_DIR=/app/frontend \
     SHOP_UPLOAD_DIR=/data/uploads \
     SHOP_DB_PATH=/data/shop.db \
+    SHOP_EMAIL_DIR=/data/mail \
     SHOP_SEED_DEMO_DATA=0 \
     SHOP_COOKIE_SECURE=1 \
     SHOP_AUTO_MIGRATE=0 \

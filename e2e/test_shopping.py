@@ -93,7 +93,7 @@ def test_price_change_while_paying_and_double_click(shop):
 
     # An administrator changes the price meanwhile, in another browser.
     admin = shop.page.context.browser.new_context().new_page()
-    admin.goto(shop.url + "/")
+    admin.goto(shop.url + "/login.html")
     admin.click("[data-role=admin]")
     admin.fill("#username", "admin")
     admin.fill("#password", "admin123")

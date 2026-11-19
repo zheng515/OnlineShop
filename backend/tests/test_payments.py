@@ -9,7 +9,7 @@ from datetime import timedelta
 import pytest
 
 from app import order_service, security
-from app.jobs import run_once
+from app.jobs import expire_orders_once as run_once
 from app.payments import mock as mock_module
 from app.payments import service
 from app.payments.mock import MockProvider, sign

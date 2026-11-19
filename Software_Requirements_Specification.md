@@ -20,32 +20,39 @@
 >   provider** that behaves like a real one but moves no money. Orders now wait for payment, and
 >   unpaid orders are cancelled automatically when their payment deadline passes. FR32, FR38, FR41,
 >   FR43, FR46, FR47, FR48 and FR49 are updated accordingly.
+> - **Rev. 8** adds customer accounts and email (Section 13, FR88–FR99): visitors can browse without
+>   logging in, customers can register, confirm their email address, reset a forgotten password and
+>   manage their account, and the shop sends account and order emails. FR1–FR6, FR15–FR17, FR19,
+>   FR53, FR54 and FR59 are updated accordingly.
 
 ## 1. Login and Access Control
 
 **FR1 — Role Selection**  
-The system shall provide a login page where visitors can select either **Administrator Login** or **Customer Login**. Customer Login shall be selected by default. A user who is already logged in and opens the login page shall be redirected to the home page of their role (see FR4).
+The system shall provide a login page where visitors can select either **Administrator Login** or **Customer Login**. Customer Login shall be selected by default. The login page shall link to registration (FR89) and to password reset (FR91). A user who is already logged in and opens the login page shall be redirected to the home page of their role (see FR4). The shop's start page is the product list, which visitors can use without logging in (FR88).
 
 **FR2 — User Authentication**  
 The system shall authenticate administrators and customers using their assigned account credentials. The system shall display an error message when the supplied credentials are invalid.  
-- Credentials are valid only when the username exists, the password matches, **and** the account's role matches the selected login option. An administrator account used with Customer Login, or a customer account used with Administrator Login, shall be rejected as invalid credentials.  
+- A user identifies themselves with their username or, for accounts that have one, their email address.  
+- Credentials are valid only when the account exists, the password matches, **and** the account's role matches the selected login option. An administrator account used with Customer Login, or a customer account used with Administrator Login, shall be rejected as invalid credentials.  
 - The error message shall not reveal whether the username, the password or the role was wrong (e.g. "Invalid username or password for Customer Login.").  
 - If the username or password is left empty, the system shall ask the user to enter it without attempting authentication.  
+- A customer who registered but has not yet confirmed their email address shall not be logged in; they shall be told to confirm it and offered to have the confirmation email sent again (FR90).  
 - Repeated failed attempts are throttled as described in FR53.
 
-**FR3 — Preconfigured Customer Accounts**  
-The system shall support preconfigured customer accounts for this version. Customer self-registration shall not be provided.  
-- Accounts (administrator and customer) are created and maintained by an operator with a server-side account command, not through the web interface (FR54). For local development and demonstrations, a set of demo accounts may be created on first start-up (FR54).  
-- No function to register, create, edit or delete accounts shall be provided in the user interface.  
+**FR3 — Accounts**  
+- Customers can create their own accounts through registration (FR89).  
+- Administrator accounts are created and maintained only by an operator with a server-side account command (FR54); the web interface offers no way to create administrators or to give an account administrator rights. The operator can also create customer accounts with that command.  
+- For local development and demonstrations, a set of demo accounts may be created on first start-up (FR54).  
+- Accounts cannot be deleted through the web interface in this version.  
 - Passwords shall be stored only in hashed form, using a slow, salted password-hashing function.
 
 **FR4 — Role-Based Redirection**  
-After successful authentication, the system shall redirect administrators to the Product Management page and customers to the Product Browsing page. Administrators can reach the Order Management page (FR49) from the navigation bar; customers can reach the Shopping Cart and My Orders (FR46).
+After successful authentication, the system shall redirect administrators to the Product Management page and customers to the Product Browsing page — or, if the customer was sent to the login page from another shop page, back to that page (FR98). Administrators can reach the Order Management page (FR49) from the navigation bar; customers can reach the Shopping Cart and My Orders (FR46).
 
 **FR5 — Role-Based Access Control**  
-The system shall restrict product management functions to authenticated administrators and shopping functions to authenticated customers. Order management is restricted to administrators, and each customer can see and act on only their own orders (FR50).  
+The system shall restrict product management functions to authenticated administrators and shopping functions to authenticated customers. Order management is restricted to administrators, and each customer can see and act on only their own orders (FR50). Browsing the catalogue is open to everyone (FR88).  
 - Access control shall be enforced on the server for every request, not only in the user interface.  
-- A user who is not logged in, or whose session has expired (FR36), and who opens any page other than the login page shall be returned to the login page.  
+- A visitor who is not logged in, or whose session has expired (FR36), and who opens a page that needs an account (cart, checkout, orders, account, administration) shall be sent to the login page, and back to that page after logging in (FR98).  
 - A logged-in user who opens a page belonging to the other role shall be redirected to the home page of their own role.
 
 **FR6 — Logout**  
@@ -102,7 +109,7 @@ The system shall allow administrators to upload, replace, remove and reorder pro
 ## 3. Customer — Product Browsing and Search
 
 **FR15 — Browse Products**  
-The system shall display a list of products to customers, showing each product's main image, name, and price.  
+The system shall display a list of products to customers and to visitors who are not logged in (FR88), showing each product's main image, name, and price.  
 - Products shall be listed with the most recently added first unless another order is chosen (FR64), in pages of **12** products (FR63).  
 - Customers can narrow the list by category, price range, size and availability (FR65).  
 - A product that is out of stock in every size shall still be displayed, marked "Out of stock", unless the customer chooses to see only products in stock.
@@ -128,7 +135,7 @@ The system shall allow customers to select one available size from **S, M, L, an
 ## 4. Customer — Shopping Cart
 
 **FR19 — Add to Cart**  
-The system shall allow customers to add a product with a selected size and quantity to their shopping cart, provided sufficient stock is available. The requested quantity shall be a positive integer.  
+The system shall allow customers to add a product with a selected size and quantity to their shopping cart, provided sufficient stock is available. A visitor who is not logged in and chooses **Add to Cart** or **Buy Now** shall be asked to log in or register, and brought back to the product afterwards (FR88, FR98). The requested quantity shall be a positive integer.  
 - "Sufficient stock" means that the quantity already in the cart for that product and size, plus the requested quantity, does not exceed the current stock for that size.  
 - Each customer has one cart. It is stored on the server, belongs to the customer's account, and is kept after logout.  
 - Adding an item to the cart does **not** reserve stock (FR38).
@@ -285,15 +292,15 @@ After a successful login, the server shall identify the session with a random, u
 - State-changing requests, including login, whose `Origin` (or, if absent, `Referer`) header names a different site shall be rejected.
 
 **FR53 — Login Throttling**  
-- **Per username:** after **5** failed login attempts for the same username within **15 minutes** (counting only failures since the last successful login), further attempts for that username shall be refused until 15 minutes have passed since the oldest of those 5 failures.  
+- **Per account name:** after **5** failed login attempts for the same username or email address (ignoring letter case) within **15 minutes** (counting only failures since the last successful login), further attempts for that username shall be refused until 15 minutes have passed since the oldest of those 5 failures.  
 - **Per client address:** after **30** failed login attempts from the same client address within **15 minutes**, further attempts from that address shall be refused in the same way.  
 - While refused, even a correct password shall not log the user in, and refused attempts shall not extend the waiting time.  
 - The refusal message shall say how many minutes to wait, and shall be the same whether or not the username exists.
 
 **FR54 — Accounts and Passwords**  
-- Accounts shall be created, and passwords set, with a server-side account command run by an operator. It shall not be possible to do this from the web interface (FR3).  
+- Administrator accounts shall be created, and their passwords set, only with a server-side account command run by an operator (FR3). Customers register themselves (FR89) and manage their password through the account page (FR92) and password reset (FR91).  
 - A password shall be 8–128 characters long, contain at least one letter and one digit, and differ from the username.  
-- Setting a new password shall end all existing sessions of that account.  
+- Setting a new password with the account command or by password reset shall end all existing sessions of that account. Changing it on the account page shall end all other sessions, keeping the one in use.  
 - The login page shall not display any usernames or passwords.  
 - Demo accounts with publicly known passwords may be created on first start-up only when demo data is enabled. Demo data shall be disabled in production. While any account still has its demo password, the server shall log a warning at start-up.
 
@@ -315,7 +322,7 @@ Requests whose body is larger than **6 MB** shall be rejected before they are pr
 Unexpected server errors shall produce a generic message without technical details (no stack traces, file paths or database messages). The details shall be written to the server log.
 
 **FR59 — Security Logging**  
-The server shall log security events — successful logins, failed logins, refused (throttled) logins, logouts, password changes and rejected anti-forgery checks — with the time, the username (if any) and the client address. Passwords, session identifiers and anti-forgery tokens shall never be logged.
+The server shall log security events — successful logins, failed logins, refused (throttled) logins, logins refused because the email address is not confirmed, logouts, registrations, email confirmations, password reset requests, password changes, requests refused by rate limits (FR94) and rejected anti-forgery checks — with the time, the username or email address (if any) and the client address. Passwords, session identifiers, anti-forgery tokens and account tokens (FR93) shall never be logged.
 
 ## 10. Product Catalogue
 
@@ -442,3 +449,54 @@ Payment providers shall be connected through one interface — start a payment a
 
 **FR87 — Orders from Earlier Versions**  
 Orders placed before payments were introduced (status **Placed**) shall be treated as **Paid**: they can be shipped, completed or cancelled as paid orders, but cancelling them starts no refund, because nothing was paid through the system.
+
+## 13. Customer Accounts and Email
+
+**FR88 — Browsing Without an Account**  
+Visitors who are not logged in shall be able to browse, search, filter and sort the catalogue and open product pages (FR15–FR18, FR60–FR66). Everything else — cart, checkout, orders, payments, the account page — needs a customer account. The navigation bar shall show **Log in** and **Register** to visitors.
+
+**FR89 — Registration**  
+- A visitor can create a customer account by giving a username, an email address, a display name and a password (entered twice).  
+- **Username:** 3–32 characters (letters, digits, `.`, `_`, `-`), unique regardless of letter case. **Email address:** a valid address of at most 254 characters, stored in lower case, unique. **Display name:** 1–50 characters after removing leading and trailing spaces. **Password:** as in FR54.  
+- All problems shall be reported together. A username that is taken shall be reported as taken.  
+- If the email address already belongs to an account, the registration shall look successful to the visitor, no account shall be created, and the owner of the address shall be sent an email saying that someone tried to register with it (FR96). This keeps registration from revealing which addresses have accounts.  
+- After registering, the visitor is told to confirm their email address (FR90). New accounts are always customer accounts.
+
+**FR90 — Email Confirmation**  
+- After registration, the system shall send an email with a link to confirm the address. The link shall work once and for **24 hours**.  
+- Opening the link confirms the address; the customer can then log in. An expired or used link shall show a message and offer to send a new one.  
+- A customer can ask for the confirmation email again from the login page or the confirmation page; the answer shall be the same whether or not the address belongs to an unconfirmed account.  
+- Accounts created by the account command (FR54) or as demo accounts count as confirmed.
+
+**FR91 — Password Reset**  
+- From the login page, a user can ask for a password reset by entering their email address. The answer shall always be the same ("if an account exists, an email has been sent"), whether or not the address belongs to an account.  
+- The email contains a link that works once and for **1 hour**, leading to a page where the user sets a new password (FR54). Using it ends all sessions of the account, makes earlier reset links unusable, confirms the email address if it was not confirmed yet, and sends an email saying the password was changed (FR96).  
+- Accounts without an email address (for example administrators created without one) cannot be reset this way; the operator uses the account command instead.
+
+**FR92 — Account Page**  
+Logged-in customers shall have an **Account** page showing their username and email address, where they can change their display name and change their password by entering the current password and the new one twice. A password change ends their other sessions (FR54) and sends a notification email (FR96). Changing the email address is not offered in this version.
+
+**FR93 — Account Tokens**  
+Email confirmation and password reset links shall carry a random, unguessable token. The server shall store only a one-way hash of it, accept it only before it expires and only once, and treat an unknown, expired or used token the same way.
+
+**FR94 — Abuse Protection**  
+- Registration, requests for confirmation emails and requests for password reset emails shall be limited to **10 per hour per client address**, and emails to the same address to **3 per hour** for each kind. Requests over a limit shall be refused with a message saying to try again later (registration), or answered as usual without sending another email (confirmation and reset, so the answer reveals nothing).  
+- Login throttling (FR53) also applies to email-address logins.
+
+**FR95 — Email Delivery**  
+- Emails shall be recorded in an outbox in the same transaction as the event that causes them, so that an email is sent if and only if its event happened.  
+- The server shall send outbox emails in the background, normally within **one minute**. A failed delivery shall be retried at increasing intervals up to **5** attempts; the last failure shall be recorded and logged. An email shall not be sent twice because several server processes run.  
+- The way emails leave the server shall be configurable (FR99): through an SMTP server, or — for development — written to files instead of being sent. The server shall log a warning at start-up when emails are not really sent.
+
+**FR96 — Emails Sent**  
+- **Account:** email confirmation (FR90); a notice to an existing account owner when someone registers with their address (FR89); password reset link (FR91); notice that the password was changed (FR91, FR92).  
+- **Orders** (to the customer who placed the order, if their account has an email address): order placed and awaiting payment, with the amount, the payment deadline and a link to pay (FR79); payment received; order shipped; order cancelled, with the reason (by the customer, by the shop, or because the payment deadline passed) and whether a refund was started; refund completed.
+
+**FR97 — Email Content**  
+Emails shall be plain text, address the customer by display name, name the order number where relevant, and contain links only to the shop's own public address (FR99). They shall never contain passwords. Each email shall say why it was sent.
+
+**FR98 — Return After Login**  
+When a visitor is sent to the login page from a shop page (FR5, FR19), the address of that page shall be kept and, after logging in, the customer shall be taken back to it. Only addresses within the shop shall be accepted, so the login page cannot be used to send people to other websites.
+
+**FR99 — Configuration**  
+The shop's public address (used in email links), the sender address, the email delivery method and the SMTP server's host, port, user name, password and encryption shall be configurable through environment variables (FR70). The SMTP password, like other secrets, shall not be stored in the repository.

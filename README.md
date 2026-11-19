@@ -27,22 +27,26 @@ with demo accounts and 16 demo products in four categories. Delete `backend/data
 
 ### Demo accounts (development only)
 
-| Role          | Username | Password   |
-|---------------|----------|------------|
-| Administrator | `admin`  | `admin123` |
-| Customer      | `alice`  | `alice123` |
-| Customer      | `bob`    | `bob12345` |
+| Role          | Username | Email               | Password   |
+|---------------|----------|---------------------|------------|
+| Administrator | `admin`  | —                   | `admin123` |
+| Customer      | `alice`  | `alice@example.com` | `alice123` |
+| Customer      | `bob`    | `bob@example.com`   | `bob12345` |
+
+Customers can also log in with their email address, and anyone can register a new customer account
+at `/register.html`. In development, emails are written as `.eml` files to `backend/data/mail/`
+instead of being sent — open them there to follow confirmation and password reset links.
 
 These passwords are public, so the server logs a warning at start-up while any of them is still in
 use. They are only created when demo data is enabled (the default for local development).
 
 ### Managing accounts (FR3, FR54)
 
-There is no registration or account page in the web interface. Accounts are managed from the
-`backend` directory with:
+Customers register themselves (see *Customer accounts and email* below). Administrator accounts
+can only be created by an operator, from the `backend` directory:
 
 ```bash
-python -m app.accounts create carol --role customer --name "Carol"   # prompts for the password
+python -m app.accounts create carol --role admin --name "Carol" --email carol@example.com   # prompts for the password
 python -m app.accounts set-password carol                            # also logs carol out everywhere
 python -m app.accounts list
 ```
@@ -79,10 +83,14 @@ They fail on any JavaScript error or Content Security Policy violation. Set
 
 | Page            | Who           | Requirements |
 |-----------------|---------------|--------------|
-| `index.html`    | everyone      | Login with Administrator / Customer selection (FR1–FR4) |
+| `index.html`    | everyone      | Start page: opens the product list (FR88) |
+| `login.html`    | everyone      | Login with Administrator / Customer selection, by username or email; returns to the page that sent you (FR1–FR4, FR98) |
+| `register.html`, `verify-email.html` | visitors | Registration and email confirmation (FR89, FR90) |
+| `forgot-password.html`, `reset-password.html` | visitors | Password reset by email (FR91) |
+| `account.html`  | customer      | Display name and password (FR92) |
 | `admin.html`    | administrator | Product list with search, category filter, sorting and pages; add, view, edit, delete; images; categories (FR7–FR14, FR60–FR66) |
-| `shop.html`     | customer      | Product grid with search, category/price/size/stock filters, sorting and pages, all kept in the URL (FR15–FR16, FR63–FR66) |
-| `product.html`  | customer      | Image gallery, description, category, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33, FR62) |
+| `shop.html`     | everyone      | Product grid with search, category/price/size/stock filters, sorting and pages, all kept in the URL (FR15–FR16, FR63–FR66) |
+| `product.html`  | everyone (buying: customer) | Image gallery, description, category, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33, FR62) |
 | `cart.html`     | customer      | Cart with quantity updates, removal, live prices, warnings (FR21–FR26, FR30, FR34) |
 | `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation (FR28–FR31) |
 | `payment.html`  | customer      | Order summary, amount payable and **Place Order and Pay** (FR32, FR41–FR43) |
@@ -127,6 +135,32 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   once paid (by the customer or an administrator, with a full refund); the items go back to stock.
   Every change is a guarded `UPDATE … WHERE status = <expected>`, so two simultaneous changes cannot
   both succeed, and every change is kept in the status history.
+
+## Customer accounts and email (SRS Section 13)
+
+- **Visitors (FR88):** the catalogue (`/api/products`, `/api/categories`) is open to everyone. Cart,
+  checkout, orders and the account page need a customer account; pages that need one send visitors to
+  the login page and back afterwards. Only shop-relative addresses are accepted as the way back.
+- **Registration (FR89, FR90):** username (unique ignoring case), email (lower case, unique), display
+  name and password. A confirmation email with a 24-hour, single-use link must be opened before the
+  first login. Registering with an address that already has an account looks successful, and the
+  owner gets a warning email instead, so registration does not reveal who has an account.
+- **Password reset (FR91):** a 1-hour, single-use link by email. Using it ends all sessions and sends a
+  "password changed" email. The answer to a reset request is the same for unknown addresses.
+- **Account page (FR92):** change the display name or the password; a password change ends the
+  account's other sessions.
+- **Tokens and limits (FR93, FR94):** only SHA-256 hashes of link tokens are stored. Registration and
+  emails are limited to 10 per hour per client address and 3 per hour per email address.
+- **Email delivery (FR95):** emails are written to an outbox table in the same transaction as their
+  event and sent by a background job (every `SHOP_EMAIL_INTERVAL_SECONDS`, also `python -m app.jobs`).
+  Each email is claimed before sending, so several workers never send it twice. Failures are retried
+  after 1, 5, 15 and 60 minutes; after 5 attempts the email is marked failed and logged.
+  `SHOP_EMAIL_BACKEND=smtp` sends through the configured SMTP server; `file` (the default) writes
+  `.eml` files instead, with a warning at start-up.
+- **Emails sent (FR96, FR97):** plain text, with links to `SHOP_PUBLIC_URL`. Account emails: confirm
+  your address, someone tried to register with your address, reset your password, your password was
+  changed. Order emails: placed (with the payment deadline), payment received, shipped, cancelled (with
+  the reason and any refund), refund completed.
 
 ## Payments (SRS Section 12)
 
@@ -209,6 +243,14 @@ the login throttle sees real client addresses rather than the proxy's.
 | `SHOP_PAYMENT_WEBHOOK_SECRET` | random per start | Secret for verifying payment notifications (FR81); set it to the provider's value with a real provider |
 | `SHOP_CURRENCY` | `USD` | Currency sent to the payment provider |
 | `SHOP_JOB_INTERVAL_SECONDS` | `60` | How often overdue unpaid orders are cancelled; `0` turns the job off |
+| `SHOP_PUBLIC_URL` | `http://localhost:8000` | The shop's address as customers reach it, used in email links (FR99) |
+| `SHOP_EMAIL_BACKEND` | `file` | `smtp` to send emails, `file` to write them to `SHOP_EMAIL_DIR` (FR95) |
+| `SHOP_EMAIL_DIR` | `backend/data/mail` (container: `/data/mail`) | Where the `file` backend writes `.eml` files |
+| `SHOP_EMAIL_FROM` | `OnlineShop <no-reply@example.com>` | Sender address |
+| `SHOP_SMTP_HOST`, `SHOP_SMTP_PORT` | `localhost`, `587` | SMTP server |
+| `SHOP_SMTP_USERNAME`, `SHOP_SMTP_PASSWORD` | empty | SMTP login (keep the password out of the repository) |
+| `SHOP_SMTP_SECURITY` | `starttls` | `starttls`, `ssl` or `none` |
+| `SHOP_EMAIL_INTERVAL_SECONDS` | `5` | How often the outbox is sent; `0` turns sending off |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxy addresses whose `X-Forwarded-For` uvicorn trusts |
 
 ### Schema migrations (FR69)
@@ -301,10 +343,14 @@ backend/
     orders.py            cart / checkout pricing and stock evaluation
     order_service.py     order placement, statuses, cancellation, refund records
     payments/            provider interface, mock provider, payment service (notifications, refunds, deadline)
-    jobs.py              background job: cancel orders whose payment deadline passed
+    jobs.py              background jobs: cancel orders after the payment deadline, send outbox emails
+    account_service.py   registration, email confirmation, password reset, account page
+    email/               outbox, email texts, delivery (SMTP or files)
+    notifications.py     order emails
+    rate_limits.py       request counting for the abuse limits
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, admin_products, admin_orders, catalog (categories), health, shop, orders, payments
+    routers/             auth, account, admin_products, admin_orders, catalog (categories), health, shop, orders, payments
   migrations/            Alembic environment and numbered migration scripts
   tests/                 pytest suite (SQLite and PostgreSQL)
   requirements*.txt      pinned dependencies; requirements.lock pins everything (FR77)

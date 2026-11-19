@@ -14,6 +14,8 @@ from ..security import require_customer, utcnow
 from .catalog import catalogue_query
 
 router = APIRouter(prefix="/api", tags=["shop"], dependencies=[Depends(require_customer)])
+# Browsing is open to visitors who are not logged in (FR88).
+public_router = APIRouter(prefix="/api", tags=["catalog"])
 
 Quantity = Annotated[int, Field(strict=True, gt=0, le=1_000_000)]
 Size = Literal[SIZES]
@@ -58,10 +60,10 @@ def _cart(conn: Database, user_id: int) -> dict:
     return evaluate_lines(conn, cart_lines(conn, user_id))
 
 
-# --- Browsing -------------------------------------------------------------
+# --- Browsing (public) ----------------------------------------------------
 
 
-@router.get("/products")
+@public_router.get("/products")
 def browse(
     q: str = "",
     category: str = "",
@@ -81,7 +83,7 @@ def browse(
     return {**result, "count": result["total"], "query": q}
 
 
-@router.get("/products/{product_id}")
+@public_router.get("/products/{product_id}")
 def product_detail(product_id: int, conn: Database = Depends(get_db)):
     product = get_product(conn, product_id)
     if product is None:

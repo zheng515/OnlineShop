@@ -14,9 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .database import close_pools, connect
 from .errors import install_error_handlers
-from .jobs import run_forever
+from .jobs import start_background_jobs
 from .migrations import prepare_database
-from .routers import admin_orders, admin_products, auth, catalog, health, orders, payments, shop
+from .routers import account, admin_orders, admin_products, auth, catalog, health, orders, payments, shop
 from .seed import accounts_with_demo_passwords, seed
 from .web_security import install_web_security
 
@@ -54,12 +54,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logging.getLogger("onlineshop.payments").warning(
                 "The mock payment provider is in use: payments are simulated and no money is charged (FR84)."
             )
-        jobs = asyncio.create_task(run_forever(settings)) if settings.job_interval_seconds > 0 else None
+        if settings.email_backend == "file":
+            logging.getLogger("onlineshop.email").warning(
+                "Emails are written to %s instead of being sent (SHOP_EMAIL_BACKEND=file, FR95).", settings.email_dir
+            )
+        jobs = start_background_jobs(settings)
         yield
-        if jobs:
-            jobs.cancel()
+        for job in jobs:
+            job.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await jobs
+                await job
         close_pools()
 
     app = FastAPI(title="OnlineShop", version="1.0.0", lifespan=lifespan)
@@ -69,8 +73,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(account.router)
     app.include_router(admin_products.router)
     app.include_router(catalog.router)
+    app.include_router(shop.public_router)
     app.include_router(shop.router)
     app.include_router(orders.router)
     app.include_router(payments.router)

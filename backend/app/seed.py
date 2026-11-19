@@ -14,6 +14,8 @@ DEMO_USERS = [
     ("alice", "alice123", "customer", "Alice"),
     ("bob", "bob12345", "customer", "Bob"),
 ]
+# Confirmed addresses, so the demo shows account and order emails (FR96).
+DEMO_EMAILS = {"alice": "alice@example.com", "bob": "bob@example.com"}
 
 DEMO_CATEGORIES = ["T-Shirts", "Shirts", "Hoodies & Sweatshirts", "Jackets"]
 
@@ -75,13 +77,22 @@ def seed(conn: Database, upload_dir: Path, with_demo_data: bool) -> None:
     if not with_demo_data:
         return
     # Several server workers may start at once: ON CONFLICT makes each insert safe to repeat.
+    now = utcnow().isoformat()
     for username, password, role, display_name in DEMO_USERS:
+        email = DEMO_EMAILS.get(username)
         exists = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
         if not exists:
             conn.execute(
-                """INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)
-                   ON CONFLICT DO NOTHING""",
-                (username, hash_password(password), role, display_name),
+                """INSERT INTO users (username, password_hash, role, display_name, email, email_verified_at)
+                   VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING""",
+                (username, hash_password(password), role, display_name, email, now if email else None),
+            )
+        elif email:
+            # Demo accounts created before accounts had email addresses.
+            conn.execute(
+                """UPDATE users SET email = ?, email_verified_at = ? WHERE username = ? AND email IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM users WHERE email = ?)""",
+                (email, now, username, email),
             )
     conn.commit()
 

@@ -1,7 +1,8 @@
 /* Product browsing: search, filters, sorting and pagination, all kept in the URL (FR15, FR16, FR63-FR66). */
 
 (function () {
-  if (!requireRole("customer")) return;
+  // Open to visitors who are not logged in (FR88).
+  if (!requireRole("customer", { allowGuest: true })) return;
   renderHeader("shop");
 
   const KEYS = ["q", "category", "min_price", "max_price", "size", "in_stock", "sort", "page"];

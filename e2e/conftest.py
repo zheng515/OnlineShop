@@ -11,7 +11,9 @@ fails if the page reports a JavaScript error or a Content Security Policy violat
 import functools
 import http.server
 import os
+import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -25,6 +27,7 @@ from playwright.sync_api import Page
 ROOT = Path(__file__).resolve().parent.parent
 BACKEND = ROOT / "backend"
 DEMO_PASSWORDS = {"admin": "admin123", "alice": "alice123", "bob": "bob12345"}
+SERVER_DATABASES: dict[str, Path] = {}  # server URL -> its SQLite file, for reading sent emails
 
 
 def _free_port() -> int:
@@ -58,6 +61,7 @@ def server(tmp_path_factory):
         "SHOP_UPLOAD_DIR": str(data / "uploads"),
         "SHOP_SEED_DEMO_DATA": "1",
         "SHOP_COOKIE_SECURE": "0",
+        "SHOP_EMAIL_DIR": str(data / "mail"),
     }
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
@@ -66,6 +70,7 @@ def server(tmp_path_factory):
     url = f"http://127.0.0.1:{port}"
     try:
         _wait_healthy(url, process)
+        SERVER_DATABASES[url] = data / "shop.db"
         yield url
     finally:
         process.terminate()
@@ -114,7 +119,7 @@ class Shop:
         self.page.goto(self.url + path)
 
     def login(self, username: str, role: str = "customer", password: str | None = None) -> None:
-        self.goto("/")
+        self.goto("/login.html")
         if role == "admin":
             self.page.click("[data-role=admin]")
         self.page.fill("#username", username)
@@ -124,13 +129,26 @@ class Shop:
 
     def logout(self) -> None:
         self.page.click("#logout-btn")
-        self.page.wait_for_url("**/index.html")
+        self.page.wait_for_url("**/login.html")
 
     def after_api(self, url_part: str, action) -> None:
         """Run `action` and wait until the API call containing `url_part` has answered and the page re-rendered."""
         with self.page.expect_response(lambda response: url_part in response.url):
             action()
         self.page.wait_for_timeout(100)
+
+    def last_email_link(self, to: str, kind: str) -> str:
+        """The shop link in the newest email of `kind` to `to`, read from the server's outbox."""
+        conn = sqlite3.connect(SERVER_DATABASES[self.url])
+        try:
+            row = conn.execute(
+                "SELECT body FROM email_outbox WHERE to_address = ? AND kind = ? ORDER BY id DESC LIMIT 1", (to, kind)
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row, f"no {kind} email to {to}"
+        match = re.search(r"\{\{SHOP_URL\}\}(/\S+)", row[0])
+        return self.url + match.group(1)
 
     def card_names(self) -> list[str]:
         return self.page.locator(".product-card .name").all_inner_texts()

@@ -4,7 +4,7 @@ from playwright.sync_api import expect
 
 
 def test_invalid_credentials_show_an_error(shop):
-    shop.goto("/")
+    shop.goto("/login.html")
     shop.page.click("[data-role=admin]")
     shop.page.fill("#username", "admin")
     shop.page.fill("#password", "wrong-password")
@@ -13,7 +13,7 @@ def test_invalid_credentials_show_an_error(shop):
 
 
 def test_login_page_shows_no_credentials(shop):
-    shop.goto("/")
+    shop.goto("/login.html")
     for secret in ("admin123", "alice123", "bob12345"):
         assert secret not in shop.page.content()
 
@@ -30,7 +30,7 @@ def test_each_role_lands_on_its_home_and_cannot_open_the_other(shop):
     shop.page.wait_for_url("**/shop.html")
     shop.logout()
     shop.goto("/cart.html")
-    shop.page.wait_for_url("**/index.html")
+    shop.page.wait_for_url("**/login.html?next=%2Fcart.html")
 
 
 def test_session_cookie_is_hidden_from_page_scripts(shop):
