@@ -18,8 +18,8 @@ uvicorn app.main:app --reload
 Open <http://localhost:8000>. FastAPI serves both the API (`/api/...`) and the frontend pages,
 so there is nothing else to start. Interactive API docs are at <http://localhost:8000/docs>.
 
-On first start the database (`backend/data/shop.db`) is created with demo accounts and six demo
-products. Delete `backend/data/` and `backend/uploads/` to reset everything.
+On first start the database (`backend/data/shop.db`) is created with demo accounts and 16 demo
+products in four categories. Delete `backend/data/` and `backend/uploads/` to reset everything.
 
 ### Demo accounts (development only)
 
@@ -58,9 +58,9 @@ pytest
 | Page            | Who           | Requirements |
 |-----------------|---------------|--------------|
 | `index.html`    | everyone      | Login with Administrator / Customer selection (FR1–FR4) |
-| `admin.html`    | administrator | Product list, search, add, view, edit, delete, image upload (FR7–FR14) |
-| `shop.html`     | customer      | Product grid with case-insensitive search (FR15–FR16) |
-| `product.html`  | customer      | Details, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33) |
+| `admin.html`    | administrator | Product list with search, category filter, sorting and pages; add, view, edit, delete; images; categories (FR7–FR14, FR60–FR66) |
+| `shop.html`     | customer      | Product grid with search, category/price/size/stock filters, sorting and pages, all kept in the URL (FR15–FR16, FR63–FR66) |
+| `product.html`  | customer      | Image gallery, description, category, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33, FR62) |
 | `cart.html`     | customer      | Cart with quantity updates, removal, live prices, warnings (FR21–FR26, FR30, FR34) |
 | `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation (FR28–FR31) |
 | `payment.html`  | customer      | Order summary, amount payable and **Place Order**; payment itself is out of scope (FR32, FR41–FR43) |
@@ -72,11 +72,20 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
 
 ## How some requirements are handled
 
-- **Validation (FR13):** name and image required, price > 0 with at most two decimals, stock is a
-  non-negative whole number, sizes limited to S/M/L/XL, at least one size. Checked in the browser
-  for quick feedback and always re-checked by the server.
-- **Images (FR14):** JPEG, PNG, GIF or WEBP up to 5 MB. The server checks the file's actual
-  contents, not just its name, and returns a clear error otherwise. Replacing an image removes the old file.
+- **Validation (FR13):** name and 1–8 images required, price > 0 with at most two decimals, stock is
+  a non-negative whole number, sizes limited to S/M/L/XL, at least one size, description up to
+  2,000 characters, category must exist. Checked in the browser for quick feedback and always
+  re-checked by the server.
+- **Images (FR14, FR62):** JPEG, PNG, GIF or WEBP up to 5 MB each; the server checks the file's
+  actual contents. Each image is uploaded on its own request (`POST /api/admin/images`) as soon as
+  it is chosen, so no request exceeds the 6 MB limit; saving the product (JSON, with `image_ids`)
+  attaches them in order, the first being the main image. Removed images are deleted after the save
+  (unless an order still shows them), and uploads never attached are deleted after 24 hours.
+- **Catalogue (FR60–FR67):** categories are managed on the Product Management page; deleting one
+  leaves its products uncategorised. Search matches names and descriptions with full Unicode case
+  folding (a `casefold()` SQL function registered on each connection). Filtering, sorting, counting
+  and paging all happen in SQL, and only the requested page is loaded: 12 products per page for
+  customers, 20 for administrators.
 - **Cart (FR19–FR25):** stored on the server per customer. Adding the same product and size again
   merges the entries; quantities can never exceed the stock for that size.
 - **Prices (FR25, FR30):** cart and checkout always use the product's *current* price.
@@ -139,12 +148,13 @@ backend/
     web_security.py      origin check, security headers, request size limit, error responses
     accounts.py          account command (create users, set passwords)
     seed.py              demo accounts and demo products
-    products.py          product queries and validation
+    products.py          catalogue queries (search, filters, sorting, pages) and validation
+    product_images.py    staged image uploads, attaching to products, cleanup
     orders.py            cart / checkout pricing and stock evaluation
     order_service.py     order placement, cancellation, status changes
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, admin_products, admin_orders, shop (products, cart, checkout), orders
+    routers/             auth, admin_products, admin_orders, catalog (categories), shop (products, cart, checkout), orders
   tests/                 pytest suite
 frontend/
   *.html                 pages

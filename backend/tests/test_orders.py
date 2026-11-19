@@ -1,8 +1,7 @@
-import json
 import threading
 import uuid
 
-from conftest import PNG_BYTES, create_product, login
+from conftest import create_product, login, update_product, upload_image
 
 from app.database import connect
 from app.errors import ValidationProblem
@@ -56,11 +55,7 @@ def test_buy_now_order_leaves_cart_untouched(client, admin, customer):
 def test_invalid_order_changes_nothing(client, admin, customer):
     shirt = create_product(client, admin, stock={"S": 5}).json()
     add_to_cart(client, customer, shirt["id"], "S", 4)
-    client.put(
-        f"/api/admin/products/{shirt['id']}",
-        data={"name": shirt["name"], "price": "10", "stock": json.dumps({"S": 3})},
-        headers=admin,
-    )
+    update_product(client, admin, shirt["id"], stock={"S": 3})
     response = place(client, customer, 40.0)
     assert response.status_code == 409
     body = response.json()
@@ -80,11 +75,7 @@ def test_empty_cart_cannot_be_ordered(client, customer):
 def test_price_change_requires_confirmation(client, admin, customer):
     shirt = create_product(client, admin, price="10.00", stock={"S": 5}).json()
     add_to_cart(client, customer, shirt["id"], "S", 1)
-    client.put(
-        f"/api/admin/products/{shirt['id']}",
-        data={"name": shirt["name"], "price": "12.00", "stock": json.dumps({"S": 5})},
-        headers=admin,
-    )
+    update_product(client, admin, shirt["id"], price="12.00")
     response = place(client, customer, 10.0)
     assert response.status_code == 409
     assert "Prices have changed" in response.json()["detail"]
@@ -158,11 +149,7 @@ def test_cancel_skips_deleted_products_and_removed_sizes(client, admin, customer
     add_to_cart(client, customer, gone["id"], "S", 1)
     order = place(client, customer, 3.0).json()
 
-    client.put(
-        f"/api/admin/products/{keep['id']}",
-        data={"name": "Keep", "price": "1", "stock": json.dumps({"S": 1})},
-        headers=admin,
-    )
+    update_product(client, admin, keep["id"], stock={"S": 1})
     client.delete(f"/api/admin/products/{gone['id']}", headers=admin)
 
     assert client.post(f"/api/orders/{order['id']}/cancel", headers=customer).status_code == 200
@@ -173,12 +160,8 @@ def test_order_keeps_snapshot_after_product_changes(client, admin, customer):
     shirt = create_product(client, admin, name="Original", price="8", stock={"S": 5}).json()
     order = place(client, customer, 8.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
 
-    client.put(
-        f"/api/admin/products/{shirt['id']}",
-        data={"name": "Renamed", "price": "99", "stock": json.dumps({"S": 5})},
-        files={"image": ("new.png", PNG_BYTES, "image/png")},
-        headers=admin,
-    )
+    new_image = upload_image(client, admin).json()["id"]
+    update_product(client, admin, shirt["id"], name="Renamed", price="99", image_ids=[new_image])
     client.delete(f"/api/admin/products/{shirt['id']}", headers=admin)
 
     item = client.get(f"/api/orders/{order['id']}", headers=customer).json()["items"][0]

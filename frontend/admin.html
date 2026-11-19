@@ -12,13 +12,26 @@
   <main class="container">
     <div class="page-head">
       <h1>Product Management</h1>
-      <button type="button" class="btn" id="add-btn">+ Add Product</button>
+      <div class="order-actions">
+        <button type="button" class="btn btn-secondary" id="categories-btn">Categories</button>
+        <button type="button" class="btn" id="add-btn">+ Add Product</button>
+      </div>
     </div>
 
-    <form class="search-bar mb-lg" id="search-form" role="search">
-      <input type="search" id="search-input" placeholder="Search products by name…" aria-label="Search products">
-      <button type="submit" class="btn">Search</button>
-      <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
+    <form class="filter-bar" id="search-form" role="search">
+      <div class="search-bar">
+        <input type="search" id="search-input" placeholder="Search name or description…" aria-label="Search products">
+        <button type="submit" class="btn">Search</button>
+        <button type="button" class="btn btn-secondary hidden" id="clear-search">Clear</button>
+      </div>
+      <select id="category-filter" aria-label="Filter by category"></select>
+      <select id="sort-select" aria-label="Sort products">
+        <option value="newest">Newest</option>
+        <option value="name">Name: A to Z</option>
+        <option value="price_asc">Price: low to high</option>
+        <option value="price_desc">Price: high to low</option>
+        <option value="stock_asc">Stock: low to high</option>
+      </select>
     </form>
 
     <div id="list-message" class="hidden"></div>
@@ -30,6 +43,7 @@
             <tr>
               <th>Image</th>
               <th>Name</th>
+              <th class="hide-sm">Category</th>
               <th>Price</th>
               <th class="stock-cell">S</th>
               <th class="stock-cell">M</th>
@@ -39,16 +53,17 @@
             </tr>
           </thead>
           <tbody id="product-rows">
-            <tr><td colspan="8" class="loading">Loading products…</td></tr>
+            <tr><td colspan="9" class="loading">Loading products…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
+    <div id="pagination"></div>
   </main>
 
   <!-- Add / edit product -->
   <div class="modal-backdrop hidden" id="form-modal">
-    <form class="card modal" id="product-form" novalidate>
+    <form class="card modal modal-lg" id="product-form" novalidate>
       <div class="modal-header">
         <h2 id="form-title">Add Product</h2>
         <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
@@ -57,14 +72,10 @@
         <div id="form-error" class="hidden" role="alert"></div>
 
         <div class="field">
-          <label for="image-input">Product image <span class="muted">*</span></label>
-          <div class="image-upload">
-            <div class="preview" id="image-preview">No image</div>
-            <div>
-              <input type="file" id="image-input" accept="image/jpeg,image/png,image/gif,image/webp">
-              <div class="field-hint" id="image-hint">JPEG, PNG, GIF or WEBP, up to 5 MB.</div>
-            </div>
-          </div>
+          <label for="image-input">Images <span class="muted">* (1–8, the first is the main image)</span></label>
+          <div class="image-manager" id="image-manager"></div>
+          <input type="file" id="image-input" accept="image/jpeg,image/png,image/gif,image/webp" multiple>
+          <div class="field-hint">JPEG, PNG, GIF or WEBP, up to 5 MB each. Images upload as soon as you choose them.</div>
         </div>
 
         <div class="field">
@@ -75,6 +86,17 @@
         <div class="field">
           <label for="price-input">Price (<span class="currency"></span>) <span class="muted">*</span></label>
           <input type="text" id="price-input" inputmode="decimal" placeholder="e.g. 19.99" required>
+        </div>
+
+        <div class="field">
+          <label for="category-input">Category</label>
+          <select id="category-input"></select>
+        </div>
+
+        <div class="field">
+          <label for="description-input">Description</label>
+          <textarea id="description-input" maxlength="2000" rows="4"></textarea>
+          <div class="field-hint"><span id="description-count">0</span> / 2000 characters. Plain text; line breaks are kept.</div>
         </div>
 
         <div class="field">
@@ -105,20 +127,23 @@
     </div>
   </div>
 
-  <!-- Delete confirmation -->
-  <div class="modal-backdrop hidden" id="delete-modal">
-    <div class="card modal modal-sm" role="alertdialog" aria-labelledby="delete-title">
+  <!-- Categories -->
+  <div class="modal-backdrop hidden" id="categories-modal">
+    <div class="card modal">
       <div class="modal-header">
-        <h2 id="delete-title">Delete product?</h2>
+        <h2>Categories</h2>
         <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
-        <p id="delete-text"></p>
-        <p class="muted">This action cannot be undone.</p>
+        <div id="categories-message" class="hidden" role="alert"></div>
+        <ul class="category-rows" id="category-rows"></ul>
+        <form class="search-bar" id="new-category-form">
+          <input type="text" id="new-category-input" maxlength="50" placeholder="New category name" aria-label="New category name">
+          <button type="submit" class="btn">Add</button>
+        </form>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
-        <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
       </div>
     </div>
   </div>

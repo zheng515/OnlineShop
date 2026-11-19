@@ -10,8 +10,9 @@ from ..config import SIZES
 from ..database import get_db
 from ..errors import ValidationProblem
 from ..orders import Line, cart_lines, evaluate_lines
-from ..products import customer_detail, customer_summary, get_product, list_products
+from ..products import customer_detail, customer_summary, get_product, search_products
 from ..security import require_customer, utcnow
+from .catalog import catalogue_query
 
 router = APIRouter(prefix="/api", tags=["shop"], dependencies=[Depends(require_customer)])
 
@@ -62,9 +63,23 @@ def _cart(conn: sqlite3.Connection, user_id: int) -> dict:
 
 
 @router.get("/products")
-def browse(q: str = "", conn: sqlite3.Connection = Depends(get_db)):
-    products = [customer_summary(p) for p in list_products(conn, q)]
-    return {"products": products, "count": len(products), "query": q}
+def browse(
+    q: str = "",
+    category: str = "",
+    min_price: str = "",
+    max_price: str = "",
+    size: str = "",
+    in_stock: str = "",
+    sort: str = "newest",
+    page: str = "1",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    query = catalogue_query(
+        q=q, category=category, min_price=min_price, max_price=max_price, size=size, in_stock=in_stock, sort=sort, page=page
+    )
+    result = search_products(conn, query)
+    result["products"] = [customer_summary(p) for p in result["products"]]
+    return {**result, "count": result["total"], "query": q}
 
 
 @router.get("/products/{product_id}")

@@ -219,12 +219,7 @@ def test_security_headers(client):
 
 def test_oversized_requests_are_rejected(client, admin):
     big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (6 * 1024 * 1024)
-    response = client.post(
-        "/api/admin/products",
-        data={"name": "Big", "price": "1", "stock": '{"S": 1}'},
-        files={"image": ("big.png", big, "image/png")},
-        headers=admin,
-    )
+    response = client.post("/api/admin/images", files={"image": ("big.png", big, "image/png")}, headers=admin)
     assert response.status_code == 413
     assert "too large" in response.json()["detail"]
 
@@ -236,7 +231,7 @@ def test_streamed_oversized_body_is_rejected(client, admin):
         for _ in range(7):
             yield b"x" * (1024 * 1024)
 
-    response = client.post("/api/admin/products", content=chunks(), headers={**admin, "Content-Type": "multipart/form-data; boundary=x"})
+    response = client.post("/api/admin/images", content=chunks(), headers={**admin, "Content-Type": "multipart/form-data; boundary=x"})
     assert response.status_code == 413
 
 
@@ -248,7 +243,7 @@ def test_unexpected_errors_are_generic(client, monkeypatch, caplog):
     def boom(*args, **kwargs):
         raise RuntimeError("secret database detail")
 
-    monkeypatch.setattr(shop, "list_products", boom)
+    monkeypatch.setattr(shop, "search_products", boom)
     headers = login(client, "alice", "alice123", "customer")
     quiet = TestClient(client.app, raise_server_exceptions=False)
     with caplog.at_level(logging.ERROR, logger="onlineshop"):

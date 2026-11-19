@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .database import connect, init_schema
 from .errors import install_error_handlers
-from .routers import admin_orders, admin_products, auth, orders, shop
+from .routers import admin_orders, admin_products, auth, catalog, orders, shop
 from .seed import accounts_with_demo_passwords, seed
 from .web_security import install_web_security
 
@@ -56,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(admin_products.router)
+    app.include_router(catalog.router)
     app.include_router(shop.router)
     app.include_router(orders.router)
     app.include_router(admin_orders.router)

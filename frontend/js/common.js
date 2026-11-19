@@ -294,3 +294,43 @@ function confirmDialog({ title, message, confirmLabel = "Confirm", cancelLabel =
     backdrop.querySelector('[data-answer="yes"]').focus();
   });
 }
+
+/**
+ * Render pagination for a list result ({page, pages, total, page_size}) into `container` (FR63).
+ * `onPage(n)` is called when the user picks a page; `noun` names the items, e.g. "products".
+ */
+function renderPagination(container, result, onPage, noun = "products") {
+  const { page, pages, total, page_size: size } = result;
+  const first = total ? (page - 1) * size + 1 : 0;
+  const last = Math.min(page * size, total);
+  const summary = total ? `Showing ${first}–${last} of ${total} ${noun}` : "";
+  if (pages <= 1) {
+    container.innerHTML = summary ? `<p class="pagination-summary">${summary}</p>` : "";
+    return;
+  }
+  const near = [];
+  for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) near.push(n);
+  const button = (n, label, aria, disabled = false) =>
+    `<button type="button" class="page-btn ${n === page && label === String(n) ? "current" : ""}" data-page="${n}"
+       aria-label="${aria}" ${disabled ? "disabled" : ""} ${n === page && label === String(n) ? 'aria-current="page"' : ""}>${label}</button>`;
+  container.innerHTML = `
+    <p class="pagination-summary">${summary}</p>
+    <nav class="pagination" aria-label="Pages">
+      ${button(1, "«", "First page", page === 1)}
+      ${button(page - 1, "‹", "Previous page", page === 1)}
+      ${near[0] > 1 ? '<span class="page-gap">…</span>' : ""}
+      ${near.map((n) => button(n, String(n), `Page ${n}`)).join("")}
+      ${near[near.length - 1] < pages ? '<span class="page-gap">…</span>' : ""}
+      ${button(page + 1, "›", "Next page", page === pages)}
+      ${button(pages, "»", "Last page", page === pages)}
+    </nav>`;
+  container.querySelector(".pagination").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-page]");
+    if (target && !target.disabled) onPage(Number(target.dataset.page));
+  });
+}
+
+/** Plain text with line breaks kept; markup is shown as text, never interpreted (FR61). */
+function formatDescription(text) {
+  return escapeHtml(text).replace(/\n/g, "<br>");
+}
