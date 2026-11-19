@@ -28,7 +28,7 @@ def test_role_based_access_control(client, admin, customer):
 
 
 def test_logout_invalidates_session(client):
-    headers = login(client, "bob", "bob123", "customer")
+    headers = login(client, "bob", "bob12345", "customer")
     assert client.get("/api/auth/me", headers=headers).status_code == 200
     assert client.post("/api/auth/logout", headers=headers).status_code == 200
     assert client.get("/api/auth/me", headers=headers).status_code == 401

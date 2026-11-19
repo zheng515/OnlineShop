@@ -1,15 +1,18 @@
-"""Preconfigured accounts (FR3) and optional demo products."""
+"""Demo accounts and demo products for development and demonstrations (FR3, FR39, FR54).
+
+Real accounts are created with the account command (app/accounts.py).
+"""
 
 import sqlite3
 from pathlib import Path
 
-from .security import hash_password, utcnow
+from .security import hash_password, utcnow, verify_password
 
-# Customer self-registration is out of scope, so all accounts are created here.
-DEFAULT_USERS = [
+# Publicly known passwords: only created when demo data is enabled.
+DEMO_USERS = [
     ("admin", "admin123", "admin", "Administrator"),
     ("alice", "alice123", "customer", "Alice"),
-    ("bob", "bob123", "customer", "Bob"),
+    ("bob", "bob12345", "customer", "Bob"),
 ]
 
 DEMO_PRODUCTS = [
@@ -34,8 +37,10 @@ def _shirt_svg(color: str, label: str) -> str:
 """
 
 
-def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_products: bool) -> None:
-    for username, password, role, display_name in DEFAULT_USERS:
+def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_data: bool) -> None:
+    if not with_demo_data:
+        return
+    for username, password, role, display_name in DEMO_USERS:
         exists = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
         if not exists:
             conn.execute(
@@ -46,7 +51,7 @@ def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_products: bool) -
     # Demo products are only created once, so an administrator deleting them
     # does not bring them back on the next restart.
     already_seeded = conn.execute("SELECT 1 FROM meta WHERE key = 'demo_products_seeded'").fetchone()
-    if with_demo_products and not already_seeded:
+    if not already_seeded:
         upload_dir.mkdir(parents=True, exist_ok=True)
         now = utcnow().isoformat()
         for index, (name, price_cents, color, stock) in enumerate(DEMO_PRODUCTS, start=1):
@@ -62,3 +67,13 @@ def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_products: bool) -
             )
         conn.execute("INSERT INTO meta (key, value) VALUES ('demo_products_seeded', '1')")
     conn.commit()
+
+
+def accounts_with_demo_passwords(conn: sqlite3.Connection) -> list[str]:
+    """Usernames that still use their publicly known demo password."""
+    found = []
+    for username, password, _, _ in DEMO_USERS:
+        row = conn.execute("SELECT password_hash FROM users WHERE username = ?", (username,)).fetchone()
+        if row and verify_password(password, row["password_hash"]):
+            found.append(username)
+    return found

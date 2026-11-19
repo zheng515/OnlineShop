@@ -61,13 +61,13 @@
           </div>
           <div class="field-hint" id="qty-hint"></div>
 
-          <div id="action-message" class="hidden" role="alert" style="margin-top: 1rem"></div>
+          <div id="action-message" class="hidden" role="alert"></div>
 
           <div class="purchase-actions">
             <button type="button" class="btn btn-secondary btn-lg" id="add-cart-btn">Add to Cart</button>
             <button type="button" class="btn btn-lg" id="buy-now-btn">Buy Now</button>
           </div>
-          ${anyInStock ? "" : '<div class="alert alert-warning" style="margin-top:1rem">This product is currently out of stock in all sizes.</div>'}
+          ${anyInStock ? "" : '<div class="alert alert-warning mt-md">This product is currently out of stock in all sizes.</div>'}
         </div>
       </div>`;
     bindEvents();

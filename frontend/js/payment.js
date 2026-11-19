@@ -39,7 +39,7 @@
     content.innerHTML = `
       <div class="layout-with-aside">
         <div>
-          <div class="card" style="margin-bottom: 1.25rem">${OrderSummary.itemsTable(summary)}</div>
+          <div class="card mb-lg">${OrderSummary.itemsTable(summary)}</div>
           <div class="card card-body">
             <h2>Payment Method</h2>
             <div class="payment-placeholder">
@@ -58,7 +58,7 @@
           <button type="button" class="btn btn-lg btn-block" id="place-order-btn">
             Place Order · ${formatPrice(summary.total)}
           </button>
-          <a class="btn btn-secondary btn-block" style="margin-top: 0.5rem" href="${checkoutUrl}">Back to Checkout</a>
+          <a class="btn btn-secondary btn-block mt-sm" href="${checkoutUrl}">Back to Checkout</a>
         </aside>
       </div>`;
     document.getElementById("place-order-btn").addEventListener("click", placeOrder);

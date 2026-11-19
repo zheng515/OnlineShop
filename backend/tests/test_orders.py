@@ -190,7 +190,7 @@ def test_order_keeps_snapshot_after_product_changes(client, admin, customer):
 def test_customers_only_see_their_own_orders(client, admin, customer):
     shirt = create_product(client, admin, price="1", stock={"S": 5}).json()
     order = place(client, customer, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
-    bob = login(client, "bob", "bob123", "customer")
+    bob = login(client, "bob", "bob12345", "customer")
     assert client.get("/api/orders", headers=bob).json()["count"] == 0
     assert client.get(f"/api/orders/{order['id']}", headers=bob).status_code == 404
     assert client.post(f"/api/orders/{order['id']}/cancel", headers=bob).status_code == 404
@@ -220,7 +220,7 @@ def test_admin_status_flow(client, admin, customer):
 def test_admin_order_list_filter_and_search(client, admin, customer):
     shirt = create_product(client, admin, price="1", stock={"S": 10}).json()
     first = place(client, customer, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
-    bob = login(client, "bob", "bob123", "customer")
+    bob = login(client, "bob", "bob12345", "customer")
     second = place(client, bob, 1.0, source="buy_now", product_id=shirt["id"], size="S", quantity=1).json()
     client.post(f"/api/admin/orders/{first['id']}/status", json={"status": "shipped"}, headers=admin)
 

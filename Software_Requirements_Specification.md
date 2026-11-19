@@ -7,6 +7,9 @@
 > - **Rev. 3** adds order placement and order management (Section 8, FR41–FR50). Stock is now deducted
 >   when an order is placed. FR4, FR5, FR11, FR14, FR29, FR32, FR35 and FR38 are updated accordingly.
 >   Payment processing remains out of scope.
+> - **Rev. 4** adds security requirements (Section 9, FR51–FR59): cookie-based sessions, CSRF
+>   protection, login throttling, account and password rules, security headers, HTTPS, request size
+>   limits, error handling and security logging. FR2, FR3, FR6 and FR36 are updated accordingly.
 
 ## 1. Login and Access Control
 
@@ -17,13 +20,14 @@ The system shall provide a login page where visitors can select either **Adminis
 The system shall authenticate administrators and customers using their assigned account credentials. The system shall display an error message when the supplied credentials are invalid.  
 - Credentials are valid only when the username exists, the password matches, **and** the account's role matches the selected login option. An administrator account used with Customer Login, or a customer account used with Administrator Login, shall be rejected as invalid credentials.  
 - The error message shall not reveal whether the username, the password or the role was wrong (e.g. "Invalid username or password for Customer Login.").  
-- If the username or password is left empty, the system shall ask the user to enter it without attempting authentication.
+- If the username or password is left empty, the system shall ask the user to enter it without attempting authentication.  
+- Repeated failed attempts are throttled as described in FR53.
 
 **FR3 — Preconfigured Customer Accounts**  
 The system shall support preconfigured customer accounts for this version. Customer self-registration shall not be provided.  
-- All accounts (administrator and customer) are created by the system on first start-up; at least one administrator account and one customer account shall exist.  
+- Accounts (administrator and customer) are created and maintained by an operator with a server-side account command, not through the web interface (FR54). For local development and demonstrations, a set of demo accounts may be created on first start-up (FR54).  
 - No function to register, create, edit or delete accounts shall be provided in the user interface.  
-- Passwords shall be stored only in hashed form.
+- Passwords shall be stored only in hashed form, using a slow, salted password-hashing function.
 
 **FR4 — Role-Based Redirection**  
 After successful authentication, the system shall redirect administrators to the Product Management page and customers to the Product Browsing page. Administrators can reach the Order Management page (FR49) from the navigation bar; customers can reach the Shopping Cart and My Orders (FR46).
@@ -35,7 +39,7 @@ The system shall restrict product management functions to authenticated administ
 - A logged-in user who opens a page belonging to the other role shall be redirected to the home page of their own role.
 
 **FR6 — Logout**  
-The system shall allow authenticated users to log out and return to the login page. Logging out shall invalidate the session on the server, so the session can no longer be used.
+The system shall allow authenticated users to log out and return to the login page. Logging out shall invalidate the session on the server, so the session can no longer be used, and remove the session cookie from the browser (FR51).
 
 ## 2. Administrator — Product Management
 
@@ -177,7 +181,7 @@ The system shall display a clear message when an operation cannot be completed, 
 ## 7. General Rules
 
 **FR36 — Sessions**  
-A login session shall be valid for **8 hours** from the time of login, after which the user must log in again (FR5). A session ends earlier if the user logs out (FR6).
+A login session shall be valid for **8 hours** from the time of login, after which the user must log in again (FR5). A session ends earlier if the user logs out (FR6) or the account's password is changed (FR54). Sessions are handled as described in FR51.
 
 **FR37 — Prices and Currency**  
 The shop uses a single currency. All prices, subtotals and totals shall be displayed with exactly two decimal places and calculated without rounding errors (e.g. in whole cents).
@@ -246,3 +250,49 @@ The system shall provide an **Order Management** page for administrators that:
 
 **FR50 — Order Access Control**  
 Customers shall be able to view and cancel only their own orders; an order that belongs to another customer shall be treated as not found. Administrators can view and manage all orders but cannot place orders. These rules shall be enforced by the server (FR40).
+
+## 9. Security
+
+**FR51 — Session Cookies**  
+After a successful login, the server shall identify the session with a random, unguessable session identifier sent only in a cookie.  
+- The cookie shall be marked **HttpOnly** (not readable by page scripts) and **SameSite=Lax**, and **Secure** when the site is served over HTTPS (FR56). Its lifetime shall match the session lifetime (FR36).  
+- The session identifier shall not appear in response bodies, URLs, browser storage or logs, and the server shall accept it only from this cookie.  
+- The server shall store only a one-way hash of the session identifier, so a copy of the database cannot be used to take over sessions.  
+- A new session identifier shall be issued at every login; an identifier from before the login shall never be reused.
+
+**FR52 — Cross-Site Request Forgery Protection**  
+- Every state-changing request (one that creates, changes or deletes data) made with a session shall carry the session's anti-forgery token in a request header. The token is issued with the session, in a cookie that page scripts can read. Requests with a missing or wrong token shall be rejected, and the user shall be asked to reload the page.  
+- State-changing requests, including login, whose `Origin` (or, if absent, `Referer`) header names a different site shall be rejected.
+
+**FR53 — Login Throttling**  
+- **Per username:** after **5** failed login attempts for the same username within **15 minutes** (counting only failures since the last successful login), further attempts for that username shall be refused until 15 minutes have passed since the oldest of those 5 failures.  
+- **Per client address:** after **30** failed login attempts from the same client address within **15 minutes**, further attempts from that address shall be refused in the same way.  
+- While refused, even a correct password shall not log the user in, and refused attempts shall not extend the waiting time.  
+- The refusal message shall say how many minutes to wait, and shall be the same whether or not the username exists.
+
+**FR54 — Accounts and Passwords**  
+- Accounts shall be created, and passwords set, with a server-side account command run by an operator. It shall not be possible to do this from the web interface (FR3).  
+- A password shall be 8–128 characters long, contain at least one letter and one digit, and differ from the username.  
+- Setting a new password shall end all existing sessions of that account.  
+- The login page shall not display any usernames or passwords.  
+- Demo accounts with publicly known passwords may be created on first start-up only when demo data is enabled. Demo data shall be disabled in production. While any account still has its demo password, the server shall log a warning at start-up.
+
+**FR55 — Security Headers**  
+Every response shall include headers that:  
+- restrict scripts, styles, images, fonts and connections to the site's own origin, and forbid plug-ins and inline scripts (Content Security Policy);  
+- forbid the site from being embedded in frames on other sites;  
+- stop browsers from guessing content types;  
+- send the referring address only to the site itself.  
+When the site is served over HTTPS, responses shall also tell browsers to use HTTPS for future visits (HSTS). Interactive API documentation pages, if enabled, may be exempt from the Content Security Policy.
+
+**FR56 — HTTPS**  
+In production the site shall be served only over HTTPS (for example behind a TLS-terminating reverse proxy), and the server shall be configured accordingly so that cookies are marked Secure (FR51) and HSTS is sent (FR55).
+
+**FR57 — Request Size Limit**  
+Requests whose body is larger than **6 MB** shall be rejected before they are processed, with a message that the request is too large. (The largest legitimate request is a product with a 5 MB image, FR14.)
+
+**FR58 — Error Responses**  
+Unexpected server errors shall produce a generic message without technical details (no stack traces, file paths or database messages). The details shall be written to the server log.
+
+**FR59 — Security Logging**  
+The server shall log security events — successful logins, failed logins, refused (throttled) logins, logouts, password changes and rejected anti-forgery checks — with the time, the username (if any) and the client address. Passwords, session identifiers and anti-forgery tokens shall never be logged.

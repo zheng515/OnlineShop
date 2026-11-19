@@ -21,11 +21,24 @@ CREATE TABLE IF NOT EXISTS users (
     display_name  TEXT NOT NULL
 );
 
+-- token_hash is a SHA-256 of the session identifier; the identifier itself
+-- only ever lives in the browser's HttpOnly cookie (FR51).
 CREATE TABLE IF NOT EXISTS sessions (
-    token      TEXT PRIMARY KEY,
+    token_hash TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    csrf_token TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    username   TEXT NOT NULL,
+    ip         TEXT NOT NULL,
+    success    INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts (username, created_at);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts (ip, created_at);
 
 CREATE TABLE IF NOT EXISTS products (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +121,12 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
+    # Databases created before rev. 4 stored raw session tokens. Sessions are
+    # short-lived, so the old table is dropped (logging everyone out) rather
+    # than migrated.
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if columns and "token_hash" not in columns:
+        conn.execute("DROP TABLE sessions")
     conn.executescript(SCHEMA)
     conn.commit()
 

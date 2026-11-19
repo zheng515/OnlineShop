@@ -3,7 +3,19 @@
 const CURRENCY = "$";
 const SIZES = ["S", "M", "L", "XL"];
 const HOME_PAGES = { admin: "/admin.html", customer: "/shop.html" };
-const STORAGE_KEY = "onlineshop.session";
+// Only the user's name and role are kept in the browser for rendering the page; the session
+// itself lives in an HttpOnly cookie that scripts cannot read (FR51).
+const STORAGE_KEY = "onlineshop.user";
+const CSRF_COOKIE = "shop_csrf";
+const SAFE_METHODS = ["GET", "HEAD", "OPTIONS"];
+// Codes for 403 responses that are not about the user's role, so no redirect is wanted.
+const SECURITY_CHECK_CODES = ["csrf_failed", "origin_rejected"];
+
+try {
+  localStorage.removeItem("onlineshop.session"); // held a session token before rev. 4
+} catch {
+  /* Storage may be unavailable. */
+}
 
 class ApiError extends Error {
   constructor(message, status, data) {
@@ -15,28 +27,33 @@ class ApiError extends Error {
 }
 
 const Auth = {
-  load() {
+  get user() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
     } catch {
       return null;
     }
   },
-  save(token, user) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }));
+  save(user) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    } catch {
+      /* The server still knows who is logged in; only the header display is affected. */
+    }
   },
   clear() {
-    localStorage.removeItem(STORAGE_KEY);
-  },
-  get token() {
-    const session = this.load();
-    return session ? session.token : null;
-  },
-  get user() {
-    const session = this.load();
-    return session ? session.user : null;
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* Nothing to clear. */
+    }
   },
 };
+
+function readCookie(name) {
+  const match = document.cookie.split("; ").find((part) => part.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
+}
 
 function goToLogin() {
   Auth.clear();
@@ -50,8 +67,8 @@ function goToLogin() {
  */
 async function api(path, { method = "GET", json, form, redirectOn401 = true } = {}) {
   const headers = {};
-  const token = Auth.token;
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // Anti-forgery token for state-changing requests (FR52).
+  if (!SAFE_METHODS.includes(method)) headers["X-CSRF-Token"] = readCookie(CSRF_COOKIE);
   let body;
   if (json !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -62,7 +79,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
 
   let response;
   try {
-    response = await fetch(path, { method, headers, body });
+    response = await fetch(path, { method, headers, body, credentials: "same-origin" });
   } catch {
     throw new ApiError("Cannot reach the server. Please check your connection and try again.", 0);
   }
@@ -79,7 +96,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
     if (response.status === 401 && redirectOn401) {
       goToLogin();
     }
-    if (response.status === 403) {
+    if (response.status === 403 && !SECURITY_CHECK_CODES.includes(data && data.code)) {
       const user = Auth.user;
       if (user && HOME_PAGES[user.role]) window.location.replace(HOME_PAGES[user.role]);
     }
@@ -91,7 +108,7 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
 /** Page guard: only users with `role` may stay on this page (FR5). */
 function requireRole(role) {
   const user = Auth.user;
-  if (!user || !Auth.token) {
+  if (!user) {
     goToLogin();
     return null;
   }

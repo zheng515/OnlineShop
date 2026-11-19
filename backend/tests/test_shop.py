@@ -70,7 +70,7 @@ def test_cart_is_per_customer(client, admin, customer):
 
     product = create_product(client, admin).json()
     cart = client.post("/api/cart/items", json={"product_id": product["id"], "size": "S", "quantity": 1}, headers=customer).json()
-    bob = login(client, "bob", "bob123", "customer")
+    bob = login(client, "bob", "bob12345", "customer")
     assert client.get("/api/cart", headers=bob).json()["empty"] is True
     assert client.delete(f"/api/cart/items/{cart['items'][0]['id']}", headers=bob).status_code == 404
 

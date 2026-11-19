@@ -9,7 +9,7 @@
   let role = "customer";
 
   // Already signed in: go straight to the role's home page.
-  if (Auth.token) {
+  if (Auth.user) {
     try {
       const user = await api("/api/auth/me", { redirectOn401: false });
       window.location.replace(user.home);
@@ -53,7 +53,7 @@
         json: { username, password, role },
         redirectOn401: false,
       });
-      Auth.save(result.token, result.user);
+      Auth.save(result.user);
       window.location.replace(result.user.home);
     } catch (err) {
       showAlert(errorBox, err.errors);

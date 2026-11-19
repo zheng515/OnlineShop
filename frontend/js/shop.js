@@ -12,7 +12,7 @@
 
   function render(products, query) {
     if (!products.length) {
-      grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1">
+      grid.innerHTML = `<div class="empty-state span-all">
         <div class="icon">🔍</div>
         <p>${query ? `No products match “${escapeHtml(query)}”.` : "There are no products available right now."}</p>
         ${query ? '<button type="button" class="btn btn-secondary" id="show-all">Show all products</button>' : ""}

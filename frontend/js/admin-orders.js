@@ -85,7 +85,7 @@
     document.getElementById("detail-title").textContent = `Order ${order.number}`;
     document.getElementById("detail-body").innerHTML = `
       ${OrderView.meta(order, { showCustomer: true })}
-      <div class="card" style="margin-bottom: 1.25rem">${OrderView.items(order)}</div>
+      <div class="card mb-lg">${OrderView.items(order)}</div>
       <h2>Status history</h2>
       ${OrderView.history(order)}`;
     detailActions.innerHTML = OrderView.actionButtons(order);

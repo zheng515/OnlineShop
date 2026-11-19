@@ -18,18 +18,32 @@ uvicorn app.main:app --reload
 Open <http://localhost:8000>. FastAPI serves both the API (`/api/...`) and the frontend pages,
 so there is nothing else to start. Interactive API docs are at <http://localhost:8000/docs>.
 
-On first start the database (`backend/data/shop.db`) is created with the preconfigured accounts
-and six demo products. Delete `backend/data/` and `backend/uploads/` to reset everything.
+On first start the database (`backend/data/shop.db`) is created with demo accounts and six demo
+products. Delete `backend/data/` and `backend/uploads/` to reset everything.
 
-### Preconfigured accounts (FR3 — no self-registration)
+### Demo accounts (development only)
 
 | Role          | Username | Password   |
 |---------------|----------|------------|
 | Administrator | `admin`  | `admin123` |
 | Customer      | `alice`  | `alice123` |
-| Customer      | `bob`    | `bob123`   |
+| Customer      | `bob`    | `bob12345` |
 
-Accounts are defined in `backend/app/seed.py`.
+These passwords are public, so the server logs a warning at start-up while any of them is still in
+use. They are only created when demo data is enabled (the default for local development).
+
+### Managing accounts (FR3, FR54)
+
+There is no registration or account page in the web interface. Accounts are managed from the
+`backend` directory with:
+
+```bash
+python -m app.accounts create carol --role customer --name "Carol"   # prompts for the password
+python -m app.accounts set-password carol                            # also logs carol out everywhere
+python -m app.accounts list
+```
+
+Passwords must be 8–128 characters, contain a letter and a digit, and differ from the username.
 
 ### Running the tests
 
@@ -80,6 +94,38 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   or an administrator), which returns the items to stock. Every change is kept in the status history.
 - **Payment (FR32):** still out of scope — orders are placed without taking any payment.
 
+## Running in production
+
+| Variable | Production value | Purpose |
+|----------|------------------|---------|
+| `SHOP_SEED_DEMO_DATA` | `0` | Do not create demo accounts/products (FR54). Create real accounts with `python -m app.accounts`. |
+| `SHOP_COOKIE_SECURE` | `1` | Mark cookies `Secure` and send HSTS (FR56). |
+| `SHOP_DB_PATH`, `SHOP_UPLOAD_DIR` | persistent paths | Where the database and uploaded images live. |
+
+Serve the app only over HTTPS, e.g. behind a reverse proxy (nginx, Caddy) that terminates TLS and
+forwards to uvicorn. Make sure the proxy passes the original `Host` header through, because the
+cross-site check (FR52) compares it with the browser's `Origin`.
+
+The login throttle counts failures per client address. Behind a reverse proxy, run uvicorn with
+`--proxy-headers --forwarded-allow-ips=<proxy address>` so the real client address is used;
+otherwise every visitor appears to come from the proxy.
+
+## Security (SRS Section 9)
+
+- **Sessions (FR51):** the session id is only in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over
+  HTTPS); the database stores only its SHA-256 hash. Page scripts never see it.
+- **CSRF (FR52):** every state-changing request must send the session's anti-forgery token in the
+  `X-CSRF-Token` header (the page copies it from the readable `shop_csrf` cookie), and requests
+  whose `Origin`/`Referer` is another site are rejected — including login.
+- **Login throttling (FR53):** 5 failures per username or 30 per client address within 15 minutes
+  lock further attempts for up to 15 minutes, with the same message whether the user exists or not.
+- **Headers (FR55):** a strict Content Security Policy (no inline scripts or styles), no framing,
+  `nosniff`, `Referrer-Policy: same-origin`, and HSTS over HTTPS.
+- **Limits and errors (FR57, FR58):** request bodies over 6 MB get 413; unexpected errors return a
+  generic message and are logged with details.
+- **Logging (FR59):** logins, failures, lockouts, logouts, password changes and rejected security
+  checks are logged by the `onlineshop.security` logger, never with passwords or tokens.
+
 ## Project layout
 
 ```
@@ -88,8 +134,11 @@ backend/
     main.py              FastAPI app, static file mounts
     config.py            settings (env vars: SHOP_DB_PATH, SHOP_UPLOAD_DIR, ...)
     database.py          SQLite schema and connections
-    security.py          password hashing, session tokens, role checks
-    seed.py              preconfigured accounts and demo products
+    security.py          password hashing, cookie sessions, CSRF check, role checks
+    login_throttle.py    login throttling per username and client address
+    web_security.py      origin check, security headers, request size limit, error responses
+    accounts.py          account command (create users, set passwords)
+    seed.py              demo accounts and demo products
     products.py          product queries and validation
     orders.py            cart / checkout pricing and stock evaluation
     order_service.py     order placement, cancellation, status changes
