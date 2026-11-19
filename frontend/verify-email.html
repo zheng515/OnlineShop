@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm your email · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="login-page">
+    <div class="card login-card">
+      <div class="card-body">
+        <div class="login-title">
+          <a class="logo" href="/shop.html" aria-label="OnlineShop">OS</a>
+          <h1>Confirm your email</h1>
+        </div>
+        <div id="message" class="hidden" role="alert"></div>
+        <div id="resend" class="hidden">
+          <form id="form" novalidate>
+            <div class="field"><label for="email">Email address</label>
+              <input type="text" inputmode="email" id="email" autocomplete="email" maxlength="254"></div>
+            <button type="submit" class="btn btn-block" id="submit-btn">Send a new link</button>
+          </form>
+        </div>
+        <div class="login-links">
+          <a href="/login.html">Back to login</a>
+          <a href="/shop.html">Browse the shop</a>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/verify-email.js"></script>
+</body>
+</html>

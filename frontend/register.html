@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create an account · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <main class="login-page">
+    <div class="card login-card">
+      <div class="card-body">
+        <div class="login-title">
+          <a class="logo" href="/shop.html" aria-label="OnlineShop">OS</a>
+          <h1>Create an account</h1>
+        </div>
+        <div id="message" class="hidden" role="alert"></div>
+        <form id="form" novalidate>
+          <div class="field"><label for="username">Username</label>
+            <input type="text" id="username" autocomplete="username" maxlength="32" required>
+            <div class="field-hint">3–32 characters: letters, digits, “.”, “_” or “-”.</div></div>
+          <div class="field"><label for="email">Email address</label>
+            <input type="text" inputmode="email" id="email" autocomplete="email" maxlength="254" required></div>
+          <div class="field"><label for="display-name">Display name</label>
+            <input type="text" id="display-name" autocomplete="name" maxlength="50" required></div>
+          <div class="field"><label for="password">Password</label>
+            <input type="password" id="password" autocomplete="new-password" maxlength="128" required>
+            <div class="field-hint">8–128 characters with at least one letter and one digit.</div></div>
+          <div class="field"><label for="password-confirm">Repeat password</label>
+            <input type="password" id="password-confirm" autocomplete="new-password" maxlength="128" required></div>
+          <button type="submit" class="btn btn-lg btn-block" id="submit-btn">Create account</button>
+        </form>
+        <div class="login-links">
+          <a href="/login.html">Back to login</a>
+          <a href="/shop.html">Browse the shop</a>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/js/common.js"></script>
+  <script src="/js/register.js"></script>
+</body>
+</html>

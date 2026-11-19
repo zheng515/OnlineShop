@@ -55,9 +55,25 @@ function readCookie(name) {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : "";
 }
 
-function goToLogin() {
+const LOGIN_PAGE = "/login.html";
+// Shown to visitors who are not logged in on pages open to everyone (FR88).
+const GUEST = Object.freeze({ role: "guest" });
+
+/** A shop-relative address to come back to after logging in, or null if it is not one (FR98). */
+function safeNext(value) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
+  return value;
+}
+
+function loginUrl(next = window.location.pathname + window.location.search) {
+  const target = safeNext(next);
+  return target && target !== LOGIN_PAGE ? `${LOGIN_PAGE}?next=${encodeURIComponent(target)}` : LOGIN_PAGE;
+}
+
+/** Send the user to the login page; by default they come back here afterwards (FR5, FR98). */
+function goToLogin({ comeBack = true } = {}) {
   Auth.clear();
-  window.location.replace("/index.html");
+  window.location.replace(comeBack ? loginUrl() : LOGIN_PAGE);
 }
 
 /**
@@ -105,15 +121,19 @@ async function api(path, { method = "GET", json, form, redirectOn401 = true } = 
   return data;
 }
 
-/** Page guard: only users with `role` may stay on this page (FR5). */
-function requireRole(role) {
+/**
+ * Page guard: only users with `role` may stay on this page (FR5). With `allowGuest`, visitors who
+ * are not logged in may stay too and get GUEST (FR88). Returns null when the page is being left.
+ */
+function requireRole(role, { allowGuest = false } = {}) {
   const user = Auth.user;
   if (!user) {
+    if (allowGuest) return GUEST;
     goToLogin();
     return null;
   }
   if (user.role !== role) {
-    window.location.replace(HOME_PAGES[user.role] || "/index.html");
+    window.location.replace(HOME_PAGES[user.role] || LOGIN_PAGE);
     return null;
   }
   return user;
@@ -121,11 +141,11 @@ function requireRole(role) {
 
 async function logout() {
   try {
-    await api("/api/auth/logout", { method: "POST" });
+    await api("/api/auth/logout", { method: "POST", redirectOn401: false });
   } catch {
     /* The session is cleared locally either way. */
   }
-  goToLogin();
+  goToLogin({ comeBack: false });
 }
 
 function escapeHtml(value) {
@@ -186,7 +206,11 @@ function productImage(url, alt, className = "thumb") {
 function renderHeader(active) {
   const user = Auth.user;
   const header = document.getElementById("site-header");
-  if (!header || !user) return;
+  if (!header) return;
+  if (!user) {
+    renderGuestHeader(header, active);
+    return;
+  }
 
   const links =
     user.role === "admin"
@@ -198,6 +222,7 @@ function renderHeader(active) {
           { id: "shop", href: "/shop.html", label: "Products" },
           { id: "cart", href: "/cart.html", label: 'Cart <span class="badge hidden" id="cart-count">0</span>' },
           { id: "orders", href: "/orders.html", label: "My Orders" },
+          { id: "account", href: "/account.html", label: "Account" },
         ];
 
   header.className = "site-header";
@@ -219,6 +244,21 @@ function renderHeader(active) {
   if (user.role === "customer") refreshCartCount();
 }
 
+function renderGuestHeader(header, active) {
+  header.className = "site-header";
+  header.innerHTML = `
+    <div class="inner">
+      <a class="brand" href="/shop.html"><span class="logo">OS</span>OnlineShop</a>
+      <nav class="nav">
+        <a href="/shop.html" class="${active === "shop" ? "active" : ""}">Products</a>
+      </nav>
+      <div class="user-box">
+        <a class="btn btn-secondary btn-sm" href="${escapeHtml(loginUrl())}">Log in</a>
+        <a class="btn btn-sm" href="/register.html">Register</a>
+      </div>
+    </div>`;
+}
+
 function setCartCount(count) {
   const badge = document.getElementById("cart-count");
   if (!badge) return;
@@ -228,10 +268,14 @@ function setCartCount(count) {
 
 async function refreshCartCount() {
   try {
-    const cart = await api("/api/cart");
+    const cart = await api("/api/cart", { redirectOn401: false });
     setCartCount(cart.item_count);
-  } catch {
-    /* Badge is informational only. */
+  } catch (err) {
+    // On a page open to visitors, an expired session just turns the page into the visitor view.
+    if (err.status === 401) {
+      Auth.clear();
+      renderHeader();
+    }
   }
 }
 

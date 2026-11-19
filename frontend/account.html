@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-head"><h1>Your account</h1></div>
+    <div id="message" class="hidden" role="alert"></div>
+    <div class="layout-with-aside">
+      <div>
+        <section class="card card-body mb-lg">
+          <h2>Profile</h2>
+          <dl class="detail-list mb-lg">
+            <dt>Username</dt><dd id="username">…</dd>
+            <dt>Email</dt><dd id="email">…</dd>
+          </dl>
+          <form id="profile-form" novalidate>
+            <div class="field"><label for="display-name">Display name</label>
+              <input type="text" id="display-name" maxlength="50" autocomplete="name" required></div>
+            <button type="submit" class="btn" id="profile-btn">Save display name</button>
+          </form>
+        </section>
+        <section class="card card-body">
+          <h2>Change password</h2>
+          <form id="password-form" novalidate>
+            <div class="field"><label for="current-password">Current password</label>
+              <input type="password" id="current-password" autocomplete="current-password" maxlength="128" required></div>
+            <div class="field"><label for="new-password">New password</label>
+              <input type="password" id="new-password" autocomplete="new-password" maxlength="128" required>
+              <div class="field-hint">8–128 characters with at least one letter and one digit. You stay logged in here and are
+                logged out everywhere else.</div></div>
+            <div class="field"><label for="new-password-confirm">Repeat new password</label>
+              <input type="password" id="new-password-confirm" autocomplete="new-password" maxlength="128" required></div>
+            <button type="submit" class="btn" id="password-btn">Change password</button>
+          </form>
+        </section>
+      </div>
+      <aside class="card card-body">
+        <h2>Shortcuts</h2>
+        <p><a href="/orders.html">My Orders</a></p>
+        <p><a href="/cart.html">Shopping cart</a></p>
+        <p class="muted">Changing your email address is not available yet.</p>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/account.js"></script>
+</body>
+</html>

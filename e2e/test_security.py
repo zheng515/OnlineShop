@@ -4,7 +4,7 @@ from playwright.sync_api import expect
 
 
 def test_security_headers_on_pages(shop):
-    response = shop.page.goto(shop.url + "/index.html")
+    response = shop.page.goto(shop.url + "/login.html")
     headers = response.headers
     assert "script-src 'self'" in headers["content-security-policy"]
     assert headers["x-frame-options"] == "DENY"
@@ -31,7 +31,7 @@ def test_requests_from_another_site_are_rejected(shop, other_origin):
 
 def test_login_is_locked_after_repeated_failures(shop):
     for attempt in range(5):
-        shop.goto("/")
+        shop.goto("/login.html")
         shop.page.fill("#username", "alice")
         shop.page.fill("#password", f"wrong-{attempt}")
         shop.page.click("#login-btn")

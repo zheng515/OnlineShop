@@ -1,7 +1,9 @@
 /* Product detail page: size selection, add to cart and Buy Now (FR17-FR20, FR27, FR33). */
 
 (function () {
-  if (!requireRole("customer")) return;
+  // Open to visitors (FR88); buying needs an account (FR19).
+  const viewer = requireRole("customer", { allowGuest: true });
+  if (!viewer) return;
   renderHeader("shop");
 
   const container = document.getElementById("product-detail");
@@ -88,6 +90,7 @@
             <button type="button" class="btn btn-lg" id="buy-now-btn">Buy Now</button>
           </div>
           ${anyInStock ? "" : '<div class="alert alert-warning mt-md">This product is currently out of stock in all sizes.</div>'}
+          ${viewer === GUEST ? '<p class="field-hint mt-md">You will be asked to log in or create an account to buy.</p>' : ""}
         </div>
       </div>`;
     bindEvents();
@@ -178,9 +181,16 @@
     return qty;
   }
 
+  /** Visitors log in first and come back to this product with their choice kept (FR19, FR98). */
+  function loginFirst(quantity) {
+    const back = new URLSearchParams({ id: product.id, size: selectedSize, quantity });
+    window.location.assign(loginUrl(`/product.html?${back}`));
+  }
+
   async function addToCart() {
     const quantity = validateSelection();
     if (quantity === null) return;
+    if (viewer === GUEST) return loginFirst(quantity);
     const button = el("add-cart-btn");
     button.disabled = true;
     try {
@@ -204,6 +214,7 @@
   function buyNow() {
     const quantity = validateSelection();
     if (quantity === null) return;
+    if (viewer === GUEST) return loginFirst(quantity);
     const params = new URLSearchParams({
       source: "buy_now",
       product_id: product.id,

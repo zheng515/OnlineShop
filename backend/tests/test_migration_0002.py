@@ -3,7 +3,7 @@
 from alembic import command
 
 from app.database import connect
-from app.migrations import _config, current_revision, upgrade
+from app.migrations import _config, current_revision
 
 
 def _seed_rev6_order(url: str) -> list[int]:
@@ -37,7 +37,7 @@ def test_existing_orders_survive_and_placed_becomes_paid(database_url):
     command.upgrade(_config(database_url), "0001")
     ids = _seed_rev6_order(database_url)
 
-    upgrade(database_url)
+    command.upgrade(_config(database_url), "0002")
     assert current_revision(database_url) == "0002"
     conn = connect(database_url)
     statuses = [tuple(row) for row in conn.execute("SELECT id, status FROM orders ORDER BY id")]
@@ -65,11 +65,11 @@ def test_existing_orders_survive_and_placed_becomes_paid(database_url):
 def test_downgrade_restores_rev6_statuses(database_url):
     command.upgrade(_config(database_url), "0001")
     _seed_rev6_order(database_url)
-    upgrade(database_url)
+    command.upgrade(_config(database_url), "0002")
     command.downgrade(_config(database_url), "0001")
     conn = connect(database_url)
     assert [row[0] for row in conn.execute("SELECT status FROM orders ORDER BY id")] == ["placed", "shipped", "cancelled"]
     assert conn.execute("SELECT COUNT(*) FROM order_items").fetchone()[0] == 3
     conn.close()
-    upgrade(database_url)
+    command.upgrade(_config(database_url), "0002")
     assert current_revision(database_url) == "0002"

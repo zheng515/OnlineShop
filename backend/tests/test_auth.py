@@ -22,7 +22,11 @@ def test_account_cannot_use_other_role_login(client):
 def test_role_based_access_control(client, admin, customer):
     assert client.get("/api/admin/products", headers=customer).status_code == 403
     assert client.get("/api/cart", headers=admin).status_code == 403
-    assert client.get("/api/products").status_code == 401
+    # Browsing is open to visitors (FR88); shopping is not.
+    assert client.get("/api/products").status_code == 200
+    assert client.get("/api/categories").status_code == 200
+    assert client.get("/api/cart").status_code == 401
+    assert client.get("/api/orders").status_code == 401
     assert client.get("/api/admin/products", headers=admin).status_code == 200
     assert client.get("/api/cart", headers=customer).status_code == 200
 

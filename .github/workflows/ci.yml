@@ -116,7 +116,9 @@ jobs:
           docker compose ps
           test "$status" = healthy
           curl -fsS http://localhost:8000/api/health
-          curl -fsS http://localhost:8000/ | grep -q "Welcome to OnlineShop"
+          curl -fsS http://localhost:8000/ | grep -q "url=/shop.html"
+          curl -fsS http://localhost:8000/login.html | grep -q "Welcome to OnlineShop"
+          curl -fsS "http://localhost:8000/api/products" | grep -q "\"products\""
       - name: Application logs
         if: always()
         run: docker compose logs app

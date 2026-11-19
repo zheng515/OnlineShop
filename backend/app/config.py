@@ -37,6 +37,19 @@ class Settings:
     currency: str = "USD"
     # How often expired unpaid orders are cancelled; 0 turns the background job off (FR79).
     job_interval_seconds: int = 60
+    # Email (FR95, FR99). "file" writes emails to email_dir instead of sending them (development);
+    # "smtp" sends them through the SMTP server below.
+    public_url: str = "http://localhost:8000"
+    email_backend: str = "file"
+    email_from: str = "OnlineShop <no-reply@example.com>"
+    email_dir: Path = BACKEND_DIR / "data" / "mail"
+    smtp_host: str = "localhost"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_security: str = "starttls"  # "starttls", "ssl" or "none"
+    # How often the outbox is sent; 0 turns sending off (tests send explicitly).
+    email_interval_seconds: int = 5
 
     def __post_init__(self) -> None:
         if not self.database_url:
@@ -58,4 +71,14 @@ def load_settings() -> Settings:
         payment_webhook_secret=os.environ.get("SHOP_PAYMENT_WEBHOOK_SECRET") or secrets.token_urlsafe(32),
         currency=os.environ.get("SHOP_CURRENCY", "USD"),
         job_interval_seconds=int(os.environ.get("SHOP_JOB_INTERVAL_SECONDS", "60")),
+        public_url=os.environ.get("SHOP_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
+        email_backend=os.environ.get("SHOP_EMAIL_BACKEND", "file"),
+        email_from=os.environ.get("SHOP_EMAIL_FROM", "OnlineShop <no-reply@example.com>"),
+        email_dir=Path(os.environ.get("SHOP_EMAIL_DIR", BACKEND_DIR / "data" / "mail")),
+        smtp_host=os.environ.get("SHOP_SMTP_HOST", "localhost"),
+        smtp_port=int(os.environ.get("SHOP_SMTP_PORT", "587")),
+        smtp_username=os.environ.get("SHOP_SMTP_USERNAME", ""),
+        smtp_password=os.environ.get("SHOP_SMTP_PASSWORD", ""),
+        smtp_security=os.environ.get("SHOP_SMTP_SECURITY", "starttls"),
+        email_interval_seconds=int(os.environ.get("SHOP_EMAIL_INTERVAL_SECONDS", "5")),
     )

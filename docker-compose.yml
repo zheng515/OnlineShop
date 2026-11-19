@@ -32,12 +32,24 @@ services:
       SHOP_COOKIE_SECURE: ${SHOP_COOKIE_SECURE:-1}
       # Address of the reverse proxy whose X-Forwarded-For header is trusted for client IPs (FR53).
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # Email (FR95, FR99). With "file", emails are written to /data/mail inside the container
+      # instead of being sent; set SHOP_EMAIL_BACKEND=smtp and the SMTP settings to send them.
+      SHOP_PUBLIC_URL: ${SHOP_PUBLIC_URL:-http://localhost:8000}
+      SHOP_EMAIL_BACKEND: ${SHOP_EMAIL_BACKEND:-file}
+      SHOP_EMAIL_FROM: ${SHOP_EMAIL_FROM:-OnlineShop <no-reply@example.com>}
+      SHOP_SMTP_HOST: ${SHOP_SMTP_HOST:-}
+      SHOP_SMTP_PORT: ${SHOP_SMTP_PORT:-587}
+      SHOP_SMTP_USERNAME: ${SHOP_SMTP_USERNAME:-}
+      SHOP_SMTP_PASSWORD: ${SHOP_SMTP_PASSWORD:-}
+      SHOP_SMTP_SECURITY: ${SHOP_SMTP_SECURITY:-starttls}
     ports:
       - "${SHOP_PORT:-8000}:8000"
     volumes:
       - uploads:/data/uploads
+      - mail:/data/mail
     restart: unless-stopped
 
 volumes:
   db-data:
   uploads:
+  mail:

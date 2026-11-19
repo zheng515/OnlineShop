@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from ..config import Settings
 from ..database import Database, write_transaction
 from ..errors import ValidationProblem
+from ..notifications import refund_completed
 from ..order_service import OrderChanged, apply_transition, change_status, create_refunds, order_number, system_actor
 from ..security import security_log, utcnow
 from .provider import InvalidNotification, PaymentProvider, RefundFailed, get_provider
@@ -195,6 +196,7 @@ def process_refunds(conn: Database, settings: Settings, refund_ids: list[int], p
             "UPDATE refunds SET status = 'refunded', reference = ?, failure_reason = NULL, updated_at = ? WHERE id = ?",
             (reference, utcnow().isoformat(), refund_id),
         )
+        refund_completed(conn, refund_id)
         conn.commit()
         log.info("refunded refund=%s payment=%s", refund_id, refund["reference"])
 

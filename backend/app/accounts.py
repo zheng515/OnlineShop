@@ -18,7 +18,7 @@ import sys
 from .config import load_settings
 from .database import Database, close_pools, connect
 from .migrations import prepare_database
-from .security import end_all_sessions, hash_password
+from .security import end_all_sessions, hash_password, utcnow
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
@@ -46,17 +46,29 @@ def _check_password(username: str, password: str) -> None:
         raise AccountError(" ".join(problems))
 
 
-def create_user(conn: Database, username: str, password: str, role: str, display_name: str = "") -> int:
+def create_user(
+    conn: Database, username: str, password: str, role: str, display_name: str = "", email: str = ""
+) -> int:
+    """Create an account. Accounts made by the operator count as having a confirmed email (FR90)."""
+    from .account_service import email_problems, normalise_email
+
+    email = normalise_email(email)
+    if email and email_problems(email):
+        raise AccountError(" ".join(email_problems(email)))
     if not USERNAME_PATTERN.match(username):
         raise AccountError("Username must be 3-32 characters: letters, digits, '.', '_' or '-'.")
     if role not in ("admin", "customer"):
         raise AccountError("Role must be 'admin' or 'customer'.")
     _check_password(username, password)
-    if conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
+    if conn.execute("SELECT 1 FROM users WHERE lower(username) = lower(?)", (username,)).fetchone():
         raise AccountError(f"User '{username}' already exists.")
+    if email and conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+        raise AccountError(f"An account with the email address {email} already exists.")
     user_id = conn.insert(
-        "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
-        (username, hash_password(password), role, display_name.strip() or username),
+        """INSERT INTO users (username, password_hash, role, display_name, email, email_verified_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (username, hash_password(password), role, display_name.strip() or username, email or None,
+         utcnow().isoformat() if email else None),
     )
     conn.commit()
     return user_id
@@ -90,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("username")
     create.add_argument("--role", choices=["admin", "customer"], required=True)
     create.add_argument("--name", default="", help="display name (defaults to the username)")
+    create.add_argument("--email", default="", help="email address, needed for emails and password reset")
     create.add_argument("--password-stdin", action="store_true")
     change = commands.add_parser("set-password", help="set a new password and end the account's sessions")
     change.add_argument("username")
@@ -105,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             for row in conn.execute("SELECT username, role, display_name FROM users ORDER BY role, username"):
                 print(f"{row['username']:<20} {row['role']:<9} {row['display_name']}")
         elif args.command == "create":
-            create_user(conn, args.username, _read_password(args.password_stdin), args.role, args.name)
+            create_user(conn, args.username, _read_password(args.password_stdin), args.role, args.name, args.email)
             print(f"Created {args.role} account '{args.username}'.")
         else:
             set_password(conn, args.username, _read_password(args.password_stdin))

@@ -88,18 +88,27 @@ def clear_session_cookies(response: Response, settings: Settings) -> None:
         response.delete_cookie(name, path="/", secure=settings.cookie_secure, samesite="lax")
 
 
-def get_current_user(request: Request, conn: Database = Depends(get_db)) -> Row:
+def _session_user(request: Request, conn: Database) -> Row | None:
     token = request.cookies.get(SESSION_COOKIE)
-    row = None
-    if token:
-        row = conn.execute(
-            """
-            SELECT u.id, u.username, u.role, u.display_name, s.token_hash, s.csrf_token
-            FROM sessions s JOIN users u ON u.id = s.user_id
-            WHERE s.token_hash = ? AND s.expires_at > ?
-            """,
-            (_token_hash(token), utcnow().isoformat()),
-        ).fetchone()
+    if not token:
+        return None
+    return conn.execute(
+        """
+        SELECT u.id, u.username, u.role, u.display_name, s.token_hash, s.csrf_token
+        FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = ? AND s.expires_at > ?
+        """,
+        (_token_hash(token), utcnow().isoformat()),
+    ).fetchone()
+
+
+def optional_user(request: Request, conn: Database = Depends(get_db)) -> Row | None:
+    """The logged-in user, or None for visitors; for pages open to everyone (FR88). Read-only use."""
+    return _session_user(request, conn)
+
+
+def get_current_user(request: Request, conn: Database = Depends(get_db)) -> Row:
+    row = _session_user(request, conn)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
