@@ -22,6 +22,14 @@ class Settings:
     seed_demo_data: bool = True
     # Set when served over HTTPS: marks cookies Secure and sends HSTS (FR56).
     cookie_secure: bool = False
+    # sqlite:///path or postgresql://user:password@host/db; defaults to SQLite at db_path (FR68, FR70).
+    database_url: str = ""
+    # Apply pending migrations at start-up; turn off where migrations run separately (FR69).
+    auto_migrate: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.database_url:
+            self.database_url = f"sqlite:///{Path(self.db_path).resolve()}"
 
 
 def load_settings() -> Settings:
@@ -32,4 +40,6 @@ def load_settings() -> Settings:
         token_ttl_hours=int(os.environ.get("SHOP_TOKEN_TTL_HOURS", "8")),
         seed_demo_data=os.environ.get("SHOP_SEED_DEMO_DATA", "1") != "0",
         cookie_secure=os.environ.get("SHOP_COOKIE_SECURE", "0") == "1",
+        database_url=os.environ.get("SHOP_DATABASE_URL", ""),
+        auto_migrate=os.environ.get("SHOP_AUTO_MIGRATE", "1") != "0",
     )

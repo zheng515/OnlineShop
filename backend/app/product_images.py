@@ -1,9 +1,9 @@
 """Product image records: staged uploads, attaching to products and cleanup (FR14, FR62)."""
 
-import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
+from .database import Database
 from .images import delete_image
 from .order_service import image_referenced_by_orders
 from .security import utcnow
@@ -11,16 +11,16 @@ from .security import utcnow
 UNATTACHED_LIFETIME = timedelta(hours=24)
 
 
-def record_upload(conn: sqlite3.Connection, file_name: str) -> int:
-    image_id = conn.execute(
+def record_upload(conn: Database, file_name: str) -> int:
+    image_id = conn.insert(
         "INSERT INTO product_images (product_id, file, position, uploaded_at) VALUES (NULL, ?, 0, ?)",
         (file_name, utcnow().isoformat()),
-    ).lastrowid
+    )
     conn.commit()
     return image_id
 
 
-def attach_images(conn: sqlite3.Connection, product_id: int, image_ids: list[int]) -> list[str]:
+def attach_images(conn: Database, product_id: int, image_ids: list[int]) -> list[str]:
     """Make image_ids the product's images, in order. Returns files no longer used by the product.
 
     Runs inside the caller's transaction; delete the returned files only after it commits.
@@ -45,7 +45,7 @@ def attach_images(conn: sqlite3.Connection, product_id: int, image_ids: list[int
     return removed
 
 
-def discard_files(conn: sqlite3.Connection, upload_dir: Path, files: list[str]) -> None:
+def discard_files(conn: Database, upload_dir: Path, files: list[str]) -> None:
     """Delete image files nothing refers to any more; order history keeps its images (FR45)."""
     for file_name in files:
         still_used = conn.execute("SELECT 1 FROM product_images WHERE file = ? LIMIT 1", (file_name,)).fetchone()
@@ -53,7 +53,7 @@ def discard_files(conn: sqlite3.Connection, upload_dir: Path, files: list[str]) 
             delete_image(upload_dir, file_name)
 
 
-def cleanup_unattached(conn: sqlite3.Connection, upload_dir: Path) -> None:
+def cleanup_unattached(conn: Database, upload_dir: Path) -> None:
     """Remove uploads that were never attached to a product within the allowed time (FR14)."""
     cutoff = (utcnow() - UNATTACHED_LIFETIME).isoformat()
     files = [

@@ -1,12 +1,12 @@
 """Product data access, catalogue queries, serialisation and validation (FR13, FR60-FR67)."""
 
 import math
-import sqlite3
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .config import SIZES
+from .database import Database, Row
 from .errors import ValidationProblem
 from .images import image_url
 
@@ -54,7 +54,7 @@ PRODUCT_SELECT = """
 """
 
 
-def get_product(conn: sqlite3.Connection, product_id: int) -> dict | None:
+def get_product(conn: Database, product_id: int) -> dict | None:
     row = conn.execute(f"{PRODUCT_SELECT} WHERE p.id = ?", (product_id,)).fetchone()
     if row is None:
         return None
@@ -75,7 +75,7 @@ class CatalogueQuery:
     notices: list[str] = field(default_factory=list)
 
 
-def search_products(conn: sqlite3.Connection, query: CatalogueQuery) -> dict:
+def search_products(conn: Database, query: CatalogueQuery) -> dict:
     """One page of products matching the query; all filtering and sorting is done in SQL (FR67)."""
     clauses: list[str] = []
     params: list[Any] = []
@@ -116,7 +116,7 @@ def search_products(conn: sqlite3.Connection, query: CatalogueQuery) -> dict:
     }
 
 
-def _hydrate(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
+def _hydrate(conn: Database, rows: list[Row]) -> list[dict]:
     if not rows:
         return []
     ids = [row["id"] for row in rows]
@@ -161,10 +161,8 @@ def _hydrate(conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> list[dict]:
 
 
 def admin_view(product: dict) -> dict:
-    view = {
-        key: product[key]
-        for key in ("id", "name", "price", "description", "category", "image_url", "sizes", "total_stock", "created_at", "updated_at")
-    }
+    fields = ("id", "name", "price", "description", "category", "image_url", "sizes", "total_stock", "created_at", "updated_at")
+    view = {key: product[key] for key in fields}
     view["images"] = [{"id": image["id"], "url": image["url"]} for image in product["images"]]
     return view
 
@@ -208,7 +206,7 @@ class ProductData:
 
 
 def validate_product(
-    conn: sqlite3.Connection,
+    conn: Database,
     *,
     name: Any,
     price: Any,
@@ -280,7 +278,7 @@ def validate_product(
     return ProductData(clean_name, price_cents, clean_description, category_id, sizes, list(image_ids))
 
 
-def _image_problems(conn: sqlite3.Connection, image_ids: Any, product_id: int | None) -> list[str]:
+def _image_problems(conn: Database, image_ids: Any, product_id: int | None) -> list[str]:
     if not isinstance(image_ids, list) or not all(isinstance(i, int) and not isinstance(i, bool) for i in image_ids):
         return ["Image information is malformed."]
     if not image_ids:
@@ -293,7 +291,8 @@ def _image_problems(conn: sqlite3.Connection, image_ids: Any, product_id: int | 
     usable = {
         row["id"]
         for row in conn.execute(
-            f"SELECT id FROM product_images WHERE id IN ({placeholders}) AND (product_id IS NULL OR product_id IS ?)",
+            f"SELECT id FROM product_images WHERE id IN ({placeholders})"
+            " AND (product_id IS NULL OR product_id IS NOT DISTINCT FROM ?)",
             [*image_ids, product_id],
         )
     }

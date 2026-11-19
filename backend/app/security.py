@@ -4,13 +4,12 @@ import hashlib
 import hmac
 import logging
 import secrets
-import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request, Response, status
 
 from .config import Settings
-from .database import get_db
+from .database import Database, Row, get_db
 from .errors import ValidationProblem
 
 PBKDF2_ITERATIONS = 120_000
@@ -41,7 +40,7 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def client_ip(request: Request) -> str:
@@ -52,7 +51,7 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_session(conn: sqlite3.Connection, user_id: int, ttl_hours: int) -> tuple[str, str]:
+def create_session(conn: Database, user_id: int, ttl_hours: int) -> tuple[str, str]:
     """Create a session. Returns (session token, CSRF token); only the token's hash is stored."""
     token = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
@@ -66,12 +65,12 @@ def create_session(conn: sqlite3.Connection, user_id: int, ttl_hours: int) -> tu
     return token, csrf
 
 
-def end_session(conn: sqlite3.Connection, token_hash: str) -> None:
+def end_session(conn: Database, token_hash: str) -> None:
     conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
     conn.commit()
 
 
-def end_all_sessions(conn: sqlite3.Connection, user_id: int) -> None:
+def end_all_sessions(conn: Database, user_id: int) -> None:
     conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
     conn.commit()
 
@@ -89,7 +88,7 @@ def clear_session_cookies(response: Response, settings: Settings) -> None:
         response.delete_cookie(name, path="/", secure=settings.cookie_secure, samesite="lax")
 
 
-def get_current_user(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> sqlite3.Row:
+def get_current_user(request: Request, conn: Database = Depends(get_db)) -> Row:
     token = request.cookies.get(SESSION_COOKIE)
     row = None
     if token:
@@ -120,13 +119,13 @@ def get_current_user(request: Request, conn: sqlite3.Connection = Depends(get_db
     return row
 
 
-def require_admin(user: sqlite3.Row = Depends(get_current_user)) -> sqlite3.Row:
+def require_admin(user: Row = Depends(get_current_user)) -> Row:
     if user["role"] != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only administrators can manage products.")
     return user
 
 
-def require_customer(user: sqlite3.Row = Depends(get_current_user)) -> sqlite3.Row:
+def require_customer(user: Row = Depends(get_current_user)) -> Row:
     if user["role"] != "customer":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only customers can use shopping functions.")
     return user

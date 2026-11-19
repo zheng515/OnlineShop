@@ -1,10 +1,9 @@
 """Order placement, cancellation and status changes (FR41-FR50)."""
 
-import sqlite3
 
 from fastapi import HTTPException, status
 
-from .database import write_transaction
+from .database import Database, Row, write_transaction
 from .errors import ValidationProblem
 from .images import image_url
 from .orders import Line, cart_lines, evaluate_lines
@@ -27,7 +26,7 @@ def order_number(order_id: int) -> str:
     return f"#{order_id:06d}"
 
 
-def image_referenced_by_orders(conn: sqlite3.Connection, file_name: str) -> bool:
+def image_referenced_by_orders(conn: Database, file_name: str) -> bool:
     return conn.execute("SELECT 1 FROM order_items WHERE image = ? LIMIT 1", (file_name,)).fetchone() is not None
 
 
@@ -35,28 +34,50 @@ def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Order not found.")
 
 
-def _record_event(conn: sqlite3.Connection, order_id: int, new_status: str, actor: sqlite3.Row, now: str) -> None:
+def _record_event(conn: Database, order_id: int, new_status: str, actor: Row, now: str) -> None:
     conn.execute(
         "INSERT INTO order_events (order_id, status, actor_role, actor_name, created_at) VALUES (?, ?, ?, ?, ?)",
         (order_id, new_status, actor["role"], actor["username"], now),
     )
 
 
+def _order_for_request(conn: Database, user_id: int, request_id: str) -> int | None:
+    row = conn.execute("SELECT id FROM orders WHERE user_id = ? AND request_id = ?", (user_id, request_id)).fetchone()
+    return row["id"] if row else None
+
+
 def place_order(
-    conn: sqlite3.Connection,
-    customer: sqlite3.Row,
+    conn: Database,
+    customer: Row,
     source: str,
     buy_now_line: Line | None,
     expected_total_cents: int,
     request_id: str,
 ) -> tuple[int, bool]:
     """Place an order atomically. Returns (order_id, created); created is False for a repeated request (FR43)."""
+    try:
+        return _place_order(conn, customer, source, buy_now_line, expected_total_cents, request_id)
+    except conn.IntegrityError:
+        # The same request was placed concurrently by another process (PostgreSQL does not
+        # serialise the two the way SQLite's write lock does); return the order it created.
+        existing = _order_for_request(conn, customer["id"], request_id)
+        if existing is None:
+            raise
+        return existing, False
+
+
+def _place_order(
+    conn: Database,
+    customer: Row,
+    source: str,
+    buy_now_line: Line | None,
+    expected_total_cents: int,
+    request_id: str,
+) -> tuple[int, bool]:
     with write_transaction(conn):
-        existing = conn.execute(
-            "SELECT id FROM orders WHERE user_id = ? AND request_id = ?", (customer["id"], request_id)
-        ).fetchone()
+        existing = _order_for_request(conn, customer["id"], request_id)
         if existing:
-            return existing["id"], False
+            return existing, False
 
         lines = cart_lines(conn, customer["id"]) if source == "cart" else [buy_now_line]
         summary = evaluate_lines(conn, lines)
@@ -67,11 +88,11 @@ def place_order(
             raise ValidationProblem([PRICE_CHANGED], status.HTTP_409_CONFLICT, extra={"summary": summary})
 
         now = utcnow().isoformat()
-        order_id = conn.execute(
+        order_id = conn.insert(
             """INSERT INTO orders (user_id, status, source, total_cents, request_id, created_at, updated_at)
                VALUES (?, 'placed', ?, ?, ?, ?, ?)""",
             (customer["id"], source, summary["total_cents"], request_id, now, now),
-        ).lastrowid
+        )
 
         for line in lines:
             product = get_product(conn, line.product_id)
@@ -108,7 +129,7 @@ def place_order(
 
 
 def change_status(
-    conn: sqlite3.Connection, order_id: int, new_status: str, actor: sqlite3.Row, owner_id: int | None = None
+    conn: Database, order_id: int, new_status: str, actor: Row, owner_id: int | None = None
 ) -> None:
     """Apply a status change allowed by FR47. Cancelling puts the stock back (FR48)."""
     with write_transaction(conn):
@@ -157,7 +178,7 @@ ORDER_SELECT = """
 """
 
 
-def _summary(row: sqlite3.Row, viewer_role: str) -> dict:
+def _summary(row: Row, viewer_role: str) -> dict:
     return {
         "id": row["id"],
         "number": order_number(row["id"]),
@@ -174,7 +195,7 @@ def _summary(row: sqlite3.Row, viewer_role: str) -> dict:
 
 
 def list_orders(
-    conn: sqlite3.Connection, viewer_role: str, user_id: int | None = None, status_filter: str | None = None, keyword: str = ""
+    conn: Database, viewer_role: str, user_id: int | None = None, status_filter: str | None = None, keyword: str = ""
 ) -> list[dict]:
     clauses, params = [], []
     if user_id is not None:
@@ -187,16 +208,22 @@ def list_orders(
     if needle:
         escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
-        clauses.append(
-            "(printf('#%06d', o.id) LIKE ? ESCAPE '\\' OR u.username LIKE ? ESCAPE '\\' OR u.display_name LIKE ? ESCAPE '\\')"
+        # Portable '#' + six-digit number (FR45); LIKE is case-sensitive in PostgreSQL, so fold both sides.
+        number = (
+            "('#' || CASE WHEN length(CAST(o.id AS TEXT)) >= 6 THEN CAST(o.id AS TEXT) "
+            "ELSE substr('000000' || CAST(o.id AS TEXT), length(CAST(o.id AS TEXT)) + 1) END)"
         )
-        params += [pattern, pattern, pattern]
+        clauses.append(
+            f"({number} LIKE ? ESCAPE '\\' OR casefold(u.username) LIKE ? ESCAPE '\\'"
+            " OR casefold(u.display_name) LIKE ? ESCAPE '\\')"
+        )
+        params += [pattern, pattern.casefold(), pattern.casefold()]
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = conn.execute(f"{ORDER_SELECT}{where} ORDER BY o.id DESC", params).fetchall()
     return [_summary(row, viewer_role) for row in rows]
 
 
-def get_order(conn: sqlite3.Connection, order_id: int, viewer_role: str, user_id: int | None = None) -> dict:
+def get_order(conn: Database, order_id: int, viewer_role: str, user_id: int | None = None) -> dict:
     query, params = f"{ORDER_SELECT} WHERE o.id = ?", [order_id]
     if user_id is not None:
         query += " AND o.user_id = ?"

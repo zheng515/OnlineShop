@@ -13,6 +13,9 @@
 > - **Rev. 5** extends the product catalogue (Section 10, FR60–FR67): categories, descriptions,
 >   multiple images per product, pagination, sorting and filtering. FR7–FR17 and FR45 are updated
 >   accordingly.
+> - **Rev. 6** adds deployment, data management and quality requirements (Section 11, FR68–FR77):
+>   PostgreSQL support, versioned schema migrations, configuration, container deployment, health
+>   checks, backups, automated tests in a browser, code checks and continuous integration.
 
 ## 1. Login and Access Control
 
@@ -345,3 +348,41 @@ The current search, filters, sort order and page shall be reflected in the page 
 
 **FR67 — Catalogue Performance**  
 Searching, filtering, sorting and counting shall be done by the database, and only the products of the requested page shall be loaded and sent to the browser. The server shall not load the whole catalogue to answer a list request.
+
+## 11. Deployment, Data and Quality
+
+**FR68 — Supported Databases**  
+The system shall run on **PostgreSQL** (version 14 or later) in production. **SQLite** may be used for local development and automated tests. All functions in this document shall behave the same on both; where the databases differ (for example in letter-case folding of non-English text), the difference shall be documented.
+
+**FR69 — Schema Migrations**  
+- Every change to the database structure shall be delivered as a numbered migration script kept with the code. A single command shall bring any database — empty or created by an earlier version — to the current structure without losing data.  
+- Databases created before migrations were introduced (rev. 5 and earlier) shall be recognised and brought under migration control automatically.  
+- The server shall refuse to start if the database structure is older than the code expects, with a message naming the command to run. For local development, the server may apply migrations automatically at start-up; this can be turned off.  
+- Migrations shall be safe to start from several server processes at once: only one shall apply them.
+
+**FR70 — Configuration**  
+All settings that differ between environments — database connection, upload folder, demo data, HTTPS mode, session lifetime, automatic migrations — shall be read from environment variables, with defaults suitable for local development. Passwords and other secrets shall not be stored in the repository; example configuration files shall contain only placeholders.
+
+**FR71 — Container Deployment**  
+- The project shall provide a container image definition and a configuration that starts the application together with a PostgreSQL database using one command.  
+- The application container shall run as a non-root user, apply pending migrations before it starts serving, and keep the database and uploaded images in persistent storage that survives replacing the containers.  
+- Demo data shall be off and HTTPS mode on by default in the container configuration (FR54, FR56); an override for local trials may enable demo data.
+
+**FR72 — Health Check**  
+The system shall provide an unauthenticated health endpoint that reports whether the application can reach its database, answering success when it can and a "service unavailable" error when it cannot. It shall not reveal any other information. The container configuration shall use it to detect an unhealthy application.
+
+**FR73 — Backups**  
+The documentation shall describe how to back up and restore the database and the uploaded images, and how to check that a backup can be restored.
+
+**FR74 — Automated Tests**  
+- Automated tests shall cover the functional requirements of this document. They shall be run against both SQLite and PostgreSQL (FR68).  
+- End-to-end tests shall drive the real application in a web browser through the main flows: logging in for both roles, browsing with search, filters and pagination, cart, checkout, placing and cancelling an order, product, category and order management, and the security headers and content security policy (FR55). They shall start their own application instance with its own data and run with one command.
+
+**FR75 — Code Checks**  
+Python code shall pass an automatic static check (unused or undefined names, imports, common bug patterns), and all JavaScript files shall pass a syntax check.
+
+**FR76 — Continuous Integration**  
+On every push and pull request, an automated pipeline shall run the code checks (FR75), the automated tests on both databases and in a browser (FR74), and build the container image and verify that it starts and reports healthy (FR71, FR72). A change shall be merged only when the pipeline succeeds.
+
+**FR77 — Reproducible Builds**  
+Application dependencies shall be pinned to exact versions, and the container image shall be built from a pinned base image using only the repository and published package sources, so that the same commit produces an equivalent image.

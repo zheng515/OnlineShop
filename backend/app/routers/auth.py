@@ -1,12 +1,11 @@
 """Login, logout and current-user endpoints (FR1-FR6, FR51, FR53, FR59)."""
 
-import sqlite3
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from ..database import get_db
+from ..database import Database, Row, get_db
 from ..login_throttle import record_attempt, refusal_message, retry_after_seconds
 from ..security import (
     clear_session_cookies,
@@ -31,7 +30,7 @@ class LoginRequest(BaseModel):
     role: Literal["admin", "customer"]
 
 
-def _user_payload(user: sqlite3.Row) -> dict:
+def _user_payload(user: Row) -> dict:
     return {
         "username": user["username"],
         "display_name": user["display_name"],
@@ -41,7 +40,7 @@ def _user_payload(user: sqlite3.Row) -> dict:
 
 
 @router.post("/login")
-def login(body: LoginRequest, request: Request, response: Response, conn: sqlite3.Connection = Depends(get_db)):
+def login(body: LoginRequest, request: Request, response: Response, conn: Database = Depends(get_db)):
     settings = request.app.state.settings
     username = body.username.strip()
     ip = client_ip(request)
@@ -74,8 +73,8 @@ def login(body: LoginRequest, request: Request, response: Response, conn: sqlite
 def logout(
     request: Request,
     response: Response,
-    user: sqlite3.Row = Depends(get_current_user),
-    conn: sqlite3.Connection = Depends(get_db),
+    user: Row = Depends(get_current_user),
+    conn: Database = Depends(get_db),
 ):
     end_session(conn, user["token_hash"])
     clear_session_cookies(response, request.app.state.settings)
@@ -84,5 +83,5 @@ def logout(
 
 
 @router.get("/me")
-def me(user: sqlite3.Row = Depends(get_current_user)):
+def me(user: Row = Depends(get_current_user)):
     return _user_payload(user)

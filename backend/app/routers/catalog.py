@@ -1,12 +1,11 @@
 """Categories (FR60) and parsing of catalogue list parameters (FR63-FR66)."""
 
-import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..config import SIZES
-from ..database import get_db
+from ..database import Database, get_db
 from ..errors import ValidationProblem
 from ..products import CUSTOMER_PAGE_SIZE, CUSTOMER_SORTS, CatalogueQuery, parse_amount
 from ..security import get_current_user, require_admin, utcnow
@@ -41,7 +40,9 @@ def catalogue_query(
     low = parse_amount(min_price) if min_price.strip() else None
     high = parse_amount(max_price) if max_price.strip() else None
     if (min_price.strip() and low is None) or (max_price.strip() and high is None):
-        query.notices.append("Prices must be amounts of 0 or more with at most two decimal places. The price range was not applied.")
+        query.notices.append(
+            "Prices must be amounts of 0 or more with at most two decimal places. The price range was not applied."
+        )
     elif low is not None and high is not None and low > high:
         query.notices.append("The minimum price is higher than the maximum price. The price range was not applied.")
     else:
@@ -56,21 +57,21 @@ class CategoryIn(BaseModel):
     name: str = ""
 
 
-def _clean_name(conn: sqlite3.Connection, name: str, category_id: int | None = None) -> str:
+def _clean_name(conn: Database, name: str, category_id: int | None = None) -> str:
     clean = name.strip()
     if not clean:
         raise ValidationProblem(["Category name is required."])
     if len(clean) > MAX_CATEGORY_NAME:
         raise ValidationProblem([f"Category name must be at most {MAX_CATEGORY_NAME} characters."])
     clash = conn.execute(
-        "SELECT name FROM categories WHERE casefold(name) = ? AND id IS NOT ?", (clean.casefold(), category_id)
+        "SELECT name FROM categories WHERE casefold(name) = ? AND id IS DISTINCT FROM ?", (clean.casefold(), category_id)
     ).fetchone()
     if clash:
         raise ValidationProblem([f"A category named \"{clash['name']}\" already exists."], status.HTTP_409_CONFLICT)
     return clean
 
 
-def _categories(conn: sqlite3.Connection, non_empty_only: bool) -> list[dict]:
+def _categories(conn: Database, non_empty_only: bool) -> list[dict]:
     rows = conn.execute(
         """SELECT c.id, c.name, (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS product_count
            FROM categories c ORDER BY casefold(c.name)"""
@@ -79,24 +80,24 @@ def _categories(conn: sqlite3.Connection, non_empty_only: bool) -> list[dict]:
 
 
 @router.get("/categories")
-def list_categories(user=Depends(get_current_user), conn: sqlite3.Connection = Depends(get_db)):
+def list_categories(user=Depends(get_current_user), conn: Database = Depends(get_db)):
     # Customers only see categories they can actually browse (FR60).
     categories = _categories(conn, non_empty_only=user["role"] != "admin")
     return {"categories": categories}
 
 
 @router.post("/admin/categories", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
-def create_category(body: CategoryIn, conn: sqlite3.Connection = Depends(get_db)):
+def create_category(body: CategoryIn, conn: Database = Depends(get_db)):
     name = _clean_name(conn, body.name)
-    category_id = conn.execute(
+    category_id = conn.insert(
         "INSERT INTO categories (name, created_at) VALUES (?, ?)", (name, utcnow().isoformat())
-    ).lastrowid
+    )
     conn.commit()
     return {"id": category_id, "name": name, "product_count": 0, "message": f"Category \"{name}\" has been added."}
 
 
 @router.put("/admin/categories/{category_id}", dependencies=[Depends(require_admin)])
-def rename_category(category_id: int, body: CategoryIn, conn: sqlite3.Connection = Depends(get_db)):
+def rename_category(category_id: int, body: CategoryIn, conn: Database = Depends(get_db)):
     if conn.execute("SELECT 1 FROM categories WHERE id = ?", (category_id,)).fetchone() is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Category not found. It may have been deleted.")
     name = _clean_name(conn, body.name, category_id)
@@ -106,7 +107,7 @@ def rename_category(category_id: int, body: CategoryIn, conn: sqlite3.Connection
 
 
 @router.delete("/admin/categories/{category_id}", dependencies=[Depends(require_admin)])
-def delete_category(category_id: int, conn: sqlite3.Connection = Depends(get_db)):
+def delete_category(category_id: int, conn: Database = Depends(get_db)):
     row = conn.execute("SELECT name FROM categories WHERE id = ?", (category_id,)).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Category not found. It may have been deleted.")

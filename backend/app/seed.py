@@ -3,9 +3,9 @@
 Real accounts are created with the account command (app/accounts.py).
 """
 
-import sqlite3
 from pathlib import Path
 
+from .database import Database
 from .security import hash_password, utcnow, verify_password
 
 # Publicly known passwords: only created when demo data is enabled.
@@ -71,38 +71,44 @@ def _back_svg(color: str, label: str) -> str:
     return _shirt_svg(color, f"{label} (back)").replace("Q240 105 200 105 Q160 105 140 70", "Q240 80 200 80 Q160 80 140 70")
 
 
-def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_data: bool) -> None:
+def seed(conn: Database, upload_dir: Path, with_demo_data: bool) -> None:
     if not with_demo_data:
         return
+    # Several server workers may start at once: ON CONFLICT makes each insert safe to repeat.
     for username, password, role, display_name in DEMO_USERS:
         exists = conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone()
         if not exists:
             conn.execute(
-                "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
+                """INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)
+                   ON CONFLICT DO NOTHING""",
                 (username, hash_password(password), role, display_name),
             )
+    conn.commit()
 
-    # Demo products are only created once, so an administrator deleting them
-    # does not bring them back on the next restart.
-    already_seeded = conn.execute("SELECT 1 FROM meta WHERE key = 'demo_products_seeded'").fetchone()
-    if not already_seeded:
+    # Demo products are only created once, so an administrator deleting them does not
+    # bring them back on the next restart. Claiming the flag first means only one worker
+    # creates them; the others' inserts wait for it and then do nothing.
+    claimed = conn.execute(
+        "INSERT INTO meta (key, value) VALUES ('demo_products_seeded', '1') ON CONFLICT DO NOTHING"
+    ).rowcount == 1
+    if claimed:
         upload_dir.mkdir(parents=True, exist_ok=True)
         now = utcnow().isoformat()
         category_ids = {}
         for name in DEMO_CATEGORIES:
             existing = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
-            category_ids[name] = existing["id"] if existing else conn.execute(
+            category_ids[name] = existing["id"] if existing else conn.insert(
                 "INSERT INTO categories (name, created_at) VALUES (?, ?)", (name, now)
-            ).lastrowid
+            )
         for index, (name, price_cents, color, stock, category, description) in enumerate(DEMO_PRODUCTS, start=1):
             files = [f"demo-{index}.svg", f"demo-{index}-back.svg"]
             (upload_dir / files[0]).write_text(_shirt_svg(color, name), encoding="utf-8")
             (upload_dir / files[1]).write_text(_back_svg(color, name), encoding="utf-8")
-            product_id = conn.execute(
+            product_id = conn.insert(
                 """INSERT INTO products (name, price_cents, image, description, category_id, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (name, price_cents, files[0], description, category_ids[category], now, now),
-            ).lastrowid
+            )
             conn.executemany(
                 "INSERT INTO product_sizes (product_id, size, stock) VALUES (?, ?, ?)",
                 [(product_id, size, qty) for size, qty in stock.items()],
@@ -111,11 +117,10 @@ def seed(conn: sqlite3.Connection, upload_dir: Path, with_demo_data: bool) -> No
                 "INSERT INTO product_images (product_id, file, position, uploaded_at) VALUES (?, ?, ?, ?)",
                 [(product_id, file_name, position, now) for position, file_name in enumerate(files)],
             )
-        conn.execute("INSERT INTO meta (key, value) VALUES ('demo_products_seeded', '1')")
     conn.commit()
 
 
-def accounts_with_demo_passwords(conn: sqlite3.Connection) -> list[str]:
+def accounts_with_demo_passwords(conn: Database) -> list[str]:
     """Usernames that still use their publicly known demo password."""
     found = []
     for username, password, _, _ in DEMO_USERS:

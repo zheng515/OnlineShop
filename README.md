@@ -3,7 +3,9 @@
 An online clothing shop built from [`Software_Requirements_Specification.md`](Software_Requirements_Specification.md).
 
 - **Frontend:** plain HTML, CSS and JavaScript (`frontend/`)
-- **Backend:** Python + FastAPI with SQLite storage (`backend/`)
+- **Backend:** Python + FastAPI (`backend/`), on **PostgreSQL** in production or **SQLite** for local
+  development, with schema migrations by Alembic
+- **Deployment:** Docker image and docker compose (app + PostgreSQL); CI on GitHub Actions
 
 ## Quick start
 
@@ -11,15 +13,17 @@ An online clothing shop built from [`Software_Requirements_Specification.md`](So
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt -c requirements.lock
 uvicorn app.main:app --reload
 ```
 
 Open <http://localhost:8000>. FastAPI serves both the API (`/api/...`) and the frontend pages,
 so there is nothing else to start. Interactive API docs are at <http://localhost:8000/docs>.
 
-On first start the database (`backend/data/shop.db`) is created with demo accounts and 16 demo
-products in four categories. Delete `backend/data/` and `backend/uploads/` to reset everything.
+On first start the SQLite database (`backend/data/shop.db`) is created and migrated automatically,
+with demo accounts and 16 demo products in four categories. Delete `backend/data/` and
+`backend/uploads/` to reset everything. To develop against PostgreSQL instead, set
+`SHOP_DATABASE_URL=postgresql://user:password@localhost:5432/shop`.
 
 ### Demo accounts (development only)
 
@@ -45,13 +49,31 @@ python -m app.accounts list
 
 Passwords must be 8–128 characters, contain a letter and a digit, and differ from the username.
 
-### Running the tests
+### Running the tests and checks (FR74, FR75)
 
 ```bash
 cd backend
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.txt -c requirements.lock
+pytest                                   # on SQLite
+SHOP_TEST_DATABASE_URL=postgresql://shop:shop@localhost:5432/shop_test pytest   # on PostgreSQL
+cd .. && ruff check .                    # static checks
+```
+
+The PostgreSQL run needs an empty database the user may create schemas in; each test gets its own
+schema, dropped afterwards. One way to get one:
+`docker run -d -e POSTGRES_USER=shop -e POSTGRES_PASSWORD=shop -e POSTGRES_DB=shop_test -p 5432:5432 postgres:16`.
+
+Browser (end-to-end) tests start their own server with demo data and drive Chromium:
+
+```bash
+cd e2e
+pip install -r requirements.txt -c ../backend/requirements.lock
+python -m playwright install --with-deps chromium
 pytest
 ```
+
+They fail on any JavaScript error or Content Security Policy violation. Set
+`E2E_CHROMIUM_EXECUTABLE` to use an already installed Chromium instead.
 
 ## Pages
 
@@ -103,21 +125,96 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   or an administrator), which returns the items to stock. Every change is kept in the status history.
 - **Payment (FR32):** still out of scope — orders are placed without taking any payment.
 
-## Running in production
+## Deployment (SRS Section 11)
 
-| Variable | Production value | Purpose |
-|----------|------------------|---------|
-| `SHOP_SEED_DEMO_DATA` | `0` | Do not create demo accounts/products (FR54). Create real accounts with `python -m app.accounts`. |
-| `SHOP_COOKIE_SECURE` | `1` | Mark cookies `Secure` and send HSTS (FR56). |
-| `SHOP_DB_PATH`, `SHOP_UPLOAD_DIR` | persistent paths | Where the database and uploaded images live. |
+### With Docker (FR71)
 
-Serve the app only over HTTPS, e.g. behind a reverse proxy (nginx, Caddy) that terminates TLS and
-forwards to uvicorn. Make sure the proxy passes the original `Host` header through, because the
-cross-site check (FR52) compares it with the browser's `Origin`.
+```bash
+cp .env.example .env          # set POSTGRES_PASSWORD (letters and digits)
+docker compose up -d --build  # app on port 8000, PostgreSQL, persistent volumes
+docker compose exec app python -m app.accounts create admin --role admin   # first administrator
+```
 
-The login throttle counts failures per client address. Behind a reverse proxy, run uvicorn with
-`--proxy-headers --forwarded-allow-ips=<proxy address>` so the real client address is used;
-otherwise every visitor appears to come from the proxy.
+The container runs as a non-root user, applies pending migrations before starting two uvicorn
+workers, and reports its health at `/api/health` (FR72), which Docker uses for its health check.
+Demo data is off and cookies are `Secure` by default. For a local trial with demo accounts over
+plain HTTP: `docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build`.
+
+Building behind a TLS-inspecting proxy: pass its CA bundle with
+`docker build --secret id=ca_bundle,src=/path/to/ca.crt -t onlineshop:latest .` and then
+`docker compose up -d --no-build`.
+
+Serve the app only over HTTPS (FR56), behind a reverse proxy (nginx, Caddy, a load balancer) that
+terminates TLS, passes the original `Host` header (the cross-site check compares it with the
+browser's `Origin`), and sets `X-Forwarded-For`. Set `FORWARDED_ALLOW_IPS` to the proxy's address so
+the login throttle sees real client addresses rather than the proxy's.
+
+### Configuration (FR70)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SHOP_DATABASE_URL` | SQLite at `SHOP_DB_PATH` | `postgresql://user:password@host:5432/db` or `sqlite:////abs/path.db` |
+| `SHOP_DB_PATH` | `backend/data/shop.db` | SQLite file used when no database URL is set |
+| `SHOP_UPLOAD_DIR` | `backend/uploads` | Uploaded product images (keep on persistent storage) |
+| `SHOP_SEED_DEMO_DATA` | `1` (container: `0`) | Create demo accounts and products once (FR54) |
+| `SHOP_COOKIE_SECURE` | `0` (container: `1`) | `Secure` cookies and HSTS; required over HTTPS (FR56) |
+| `SHOP_AUTO_MIGRATE` | `1` (container: `0`) | Apply migrations at start-up; when `0` the server refuses an outdated schema |
+| `SHOP_TOKEN_TTL_HOURS` | `8` | Session lifetime (FR36) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxy addresses whose `X-Forwarded-For` uvicorn trusts |
+
+### Schema migrations (FR69)
+
+Migrations live in `backend/migrations/versions/` and run with
+`python -m app.migrations upgrade` (`check` exits 1 when migrations are pending; `current` prints
+the revision). They are safe to start from several processes at once (PostgreSQL advisory lock,
+a file lock for SQLite). SQLite databases created before migrations existed are recognised,
+brought to the rev. 5 structure and stamped automatically. To change the schema, add a new revision
+(`alembic revision -m "..."` from `backend/`) and write portable SQL — see `app/database.py`.
+
+**SQLite vs PostgreSQL (FR68):** the application uses the same SQL on both. Case-insensitive search
+uses Python's `casefold()` on SQLite and `lower()` on PostgreSQL, so on PostgreSQL "ß" does not match
+"ss"; PostgreSQL needs a UTF-8 locale (the compose file sets one) for non-English letters to fold.
+
+### Backups (FR73)
+
+Back up the database and the uploaded images together:
+
+```bash
+docker compose exec -T db pg_dump -U shop -d shop --format=custom > shop-$(date +%F).dump
+docker run --rm -v onlineshop_uploads:/data:ro -v "$PWD":/backup busybox:1.37 \
+  tar czf /backup/uploads-$(date +%F).tgz -C /data .
+```
+
+(`onlineshop_uploads` is the compose volume name; it is prefixed with the project directory name.)
+
+Check a backup by restoring it into a scratch database and looking at the data:
+
+```bash
+docker compose exec -T db createdb -U shop shop_restore_check
+docker compose exec -T db pg_restore -U shop -d shop_restore_check --no-owner < shop-2026-11-19.dump
+docker compose exec -T db psql -U shop -d shop_restore_check -c "SELECT count(*) FROM products"
+docker compose exec -T db dropdb -U shop shop_restore_check
+```
+
+Restore after data loss:
+
+```bash
+docker compose stop app
+docker compose exec -T db pg_restore -U shop -d shop --clean --if-exists --no-owner < shop-2026-11-19.dump
+docker run --rm -v onlineshop_uploads:/data -v "$PWD":/backup busybox:1.37 \
+  sh -c "rm -rf /data/* && tar xzf /backup/uploads-2026-11-19.tgz -C /data"
+docker compose start app      # applies any migrations newer than the backup
+```
+
+With SQLite, copy the database while the server runs with `sqlite3 shop.db ".backup shop-backup.db"`
+and archive the upload folder.
+
+### Continuous integration (FR76)
+
+`.github/workflows/ci.yml` runs on every push and pull request: ruff and JavaScript syntax checks,
+a migration check, the backend tests on SQLite and on PostgreSQL, the browser tests, and a
+container build that is started with PostgreSQL and must report healthy. Make the **CI passed**
+job a required status check in the repository's branch protection so only green changes merge.
 
 ## Security (SRS Section 9)
 
@@ -141,8 +238,10 @@ otherwise every visitor appears to come from the proxy.
 backend/
   app/
     main.py              FastAPI app, static file mounts
-    config.py            settings (env vars: SHOP_DB_PATH, SHOP_UPLOAD_DIR, ...)
-    database.py          SQLite schema and connections
+    config.py            settings from environment variables
+    database.py          connections and portable SQL for SQLite and PostgreSQL
+    migrations.py        migration commands, legacy database adoption
+    legacy_schema.py     upgrade path for pre-migration SQLite databases
     security.py          password hashing, cookie sessions, CSRF check, role checks
     login_throttle.py    login throttling per username and client address
     web_security.py      origin check, security headers, request size limit, error responses
@@ -154,10 +253,15 @@ backend/
     order_service.py     order placement, cancellation, status changes
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, admin_products, admin_orders, catalog (categories), shop (products, cart, checkout), orders
-  tests/                 pytest suite
+    routers/             auth, admin_products, admin_orders, catalog (categories), health, shop, orders
+  migrations/            Alembic environment and numbered migration scripts
+  tests/                 pytest suite (SQLite and PostgreSQL)
+  requirements*.txt      pinned dependencies; requirements.lock pins everything (FR77)
+e2e/                     Playwright browser tests (FR74)
 frontend/
   *.html                 pages
   css/style.css
   js/                    common helpers + one script per page
+Dockerfile, docker-compose*.yml, .env.example
+.github/workflows/ci.yml
 ```

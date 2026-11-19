@@ -2,12 +2,13 @@ import logging
 from datetime import timedelta
 
 import pytest
-from conftest import login
 
 from app import login_throttle
 from app.accounts import AccountError, create_user, password_problems, set_password
 from app.database import connect
 from app.security import utcnow
+
+from conftest import login
 
 
 def attempt(client, username="alice", password="wrong", role="customer"):
@@ -17,7 +18,7 @@ def attempt(client, username="alice", password="wrong", role="customer"):
 
 
 def db(client):
-    return connect(client.app.state.settings.db_path)
+    return connect(client.app.state.settings.database_url)
 
 
 # --- FR51 session cookies -------------------------------------------------
@@ -156,7 +157,12 @@ def test_client_address_locked_after_thirty_failures(client):
 
 @pytest.mark.parametrize(
     "password, problem",
-    [("short1", "8 to 128"), ("lettersonly", "letter and one digit"), ("12345678", "letter and one digit"), ("Carol123", "different")],
+    [
+        ("short1", "8 to 128"),
+        ("lettersonly", "letter and one digit"),
+        ("12345678", "letter and one digit"),
+        ("Carol123", "different"),
+    ],
 )
 def test_password_policy(password, problem):
     assert any(problem in p for p in password_problems("carol123", password))
@@ -188,7 +194,7 @@ def test_set_password_ends_sessions(client):
 def test_account_cli(client, monkeypatch, capsys):
     from app import accounts
 
-    monkeypatch.setenv("SHOP_DB_PATH", str(client.app.state.settings.db_path))
+    monkeypatch.setenv("SHOP_DATABASE_URL", client.app.state.settings.database_url)
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO("cliPass12\n"))
     assert accounts.main(["create", "erin", "--role", "customer", "--password-stdin"]) == 0
     assert accounts.main(["list"]) == 0
@@ -231,7 +237,8 @@ def test_streamed_oversized_body_is_rejected(client, admin):
         for _ in range(7):
             yield b"x" * (1024 * 1024)
 
-    response = client.post("/api/admin/images", content=chunks(), headers={**admin, "Content-Type": "multipart/form-data; boundary=x"})
+    headers = {**admin, "Content-Type": "multipart/form-data; boundary=x"}
+    response = client.post("/api/admin/images", content=chunks(), headers=headers)
     assert response.status_code == 413
 
 

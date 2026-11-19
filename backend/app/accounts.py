@@ -13,11 +13,11 @@ import argparse
 import getpass
 import logging
 import re
-import sqlite3
 import sys
 
 from .config import load_settings
-from .database import connect, init_schema
+from .database import Database, close_pools, connect
+from .migrations import prepare_database
 from .security import end_all_sessions, hash_password
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
@@ -46,7 +46,7 @@ def _check_password(username: str, password: str) -> None:
         raise AccountError(" ".join(problems))
 
 
-def create_user(conn: sqlite3.Connection, username: str, password: str, role: str, display_name: str = "") -> int:
+def create_user(conn: Database, username: str, password: str, role: str, display_name: str = "") -> int:
     if not USERNAME_PATTERN.match(username):
         raise AccountError("Username must be 3-32 characters: letters, digits, '.', '_' or '-'.")
     if role not in ("admin", "customer"):
@@ -54,15 +54,15 @@ def create_user(conn: sqlite3.Connection, username: str, password: str, role: st
     _check_password(username, password)
     if conn.execute("SELECT 1 FROM users WHERE username = ?", (username,)).fetchone():
         raise AccountError(f"User '{username}' already exists.")
-    user_id = conn.execute(
+    user_id = conn.insert(
         "INSERT INTO users (username, password_hash, role, display_name) VALUES (?, ?, ?, ?)",
         (username, hash_password(password), role, display_name.strip() or username),
-    ).lastrowid
+    )
     conn.commit()
     return user_id
 
 
-def set_password(conn: sqlite3.Connection, username: str, password: str) -> None:
+def set_password(conn: Database, username: str, password: str) -> None:
     user = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
     if user is None:
         raise AccountError(f"User '{username}' does not exist.")
@@ -98,10 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = load_settings()
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = connect(settings.db_path)
+    prepare_database(settings)
+    conn = connect(settings.database_url)
     try:
-        init_schema(conn)
         if args.command == "list":
             for row in conn.execute("SELECT username, role, display_name FROM users ORDER BY role, username"):
                 print(f"{row['username']:<20} {row['role']:<9} {row['display_name']}")
@@ -116,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     finally:
         conn.close()
+        close_pools()
     return 0
 
 

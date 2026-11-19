@@ -1,12 +1,11 @@
 """Administrator product management (FR7-FR14, FR60-FR65)."""
 
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
-from ..database import get_db, write_transaction
+from ..database import Database, get_db, write_transaction
 from ..errors import ValidationProblem
 from ..images import ImageUploadError, delete_image, has_file, image_url, save_image
 from ..product_images import attach_images, cleanup_unattached, discard_files, record_upload
@@ -33,11 +32,11 @@ def _not_found() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "Product not found. It may have been deleted.")
 
 
-def _validate(conn: sqlite3.Connection, body: ProductIn, product_id: int | None = None) -> ProductData:
+def _validate(conn: Database, body: ProductIn, product_id: int | None = None) -> ProductData:
     return validate_product(conn, **body.model_dump(), product_id=product_id)
 
 
-def _write_sizes(conn: sqlite3.Connection, product_id: int, sizes: dict[str, int]) -> None:
+def _write_sizes(conn: Database, product_id: int, sizes: dict[str, int]) -> None:
     conn.execute("DELETE FROM product_sizes WHERE product_id = ?", (product_id,))
     conn.executemany(
         "INSERT INTO product_sizes (product_id, size, stock) VALUES (?, ?, ?)",
@@ -46,7 +45,7 @@ def _write_sizes(conn: sqlite3.Connection, product_id: int, sizes: dict[str, int
 
 
 @router.post("/images", status_code=status.HTTP_201_CREATED)
-async def upload_image(request: Request, image: UploadFile | None = File(None), conn: sqlite3.Connection = Depends(get_db)):
+async def upload_image(request: Request, image: UploadFile | None = File(None), conn: Database = Depends(get_db)):
     """Upload one image; it becomes part of a product when that product is saved (FR14)."""
     settings = request.app.state.settings
     if not has_file(image):
@@ -57,7 +56,7 @@ async def upload_image(request: Request, image: UploadFile | None = File(None), 
         raise ValidationProblem([str(exc)]) from exc
     try:
         image_id = record_upload(conn, file_name)
-    except sqlite3.Error:
+    except conn.Error:
         delete_image(settings.upload_dir, file_name)
         raise
     cleanup_unattached(conn, settings.upload_dir)
@@ -70,7 +69,7 @@ def list_all(
     category: str = "",
     sort: str = "newest",
     page: str = "1",
-    conn: sqlite3.Connection = Depends(get_db),
+    conn: Database = Depends(get_db),
 ):
     query = catalogue_query(q=q, category=category, sort=sort, page=page, allowed_sorts=ADMIN_SORTS, page_size=ADMIN_PAGE_SIZE)
     result = search_products(conn, query)
@@ -79,7 +78,7 @@ def list_all(
 
 
 @router.get("/products/{product_id}")
-def detail(product_id: int, conn: sqlite3.Connection = Depends(get_db)):
+def detail(product_id: int, conn: Database = Depends(get_db)):
     product = get_product(conn, product_id)
     if product is None:
         raise _not_found()
@@ -87,22 +86,22 @@ def detail(product_id: int, conn: sqlite3.Connection = Depends(get_db)):
 
 
 @router.post("/products", status_code=status.HTTP_201_CREATED)
-def create(body: ProductIn, conn: sqlite3.Connection = Depends(get_db)):
+def create(body: ProductIn, conn: Database = Depends(get_db)):
     data = _validate(conn, body)
     now = utcnow().isoformat()
     with write_transaction(conn):
-        product_id = conn.execute(
+        product_id = conn.insert(
             """INSERT INTO products (name, price_cents, image, description, category_id, created_at, updated_at)
                VALUES (?, ?, '', ?, ?, ?, ?)""",
             (data.name, data.price_cents, data.description, data.category_id, now, now),
-        ).lastrowid
+        )
         _write_sizes(conn, product_id, data.sizes)
         attach_images(conn, product_id, data.image_ids)
     return admin_view(get_product(conn, product_id))
 
 
 @router.put("/products/{product_id}")
-def update(product_id: int, body: ProductIn, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+def update(product_id: int, body: ProductIn, request: Request, conn: Database = Depends(get_db)):
     if get_product(conn, product_id) is None:
         raise _not_found()
     data = _validate(conn, body, product_id)
@@ -120,7 +119,7 @@ def update(product_id: int, body: ProductIn, request: Request, conn: sqlite3.Con
 
 
 @router.delete("/products/{product_id}")
-def delete(product_id: int, request: Request, conn: sqlite3.Connection = Depends(get_db)):
+def delete(product_id: int, request: Request, conn: Database = Depends(get_db)):
     existing = get_product(conn, product_id)
     if existing is None:
         raise _not_found()

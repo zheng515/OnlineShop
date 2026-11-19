@@ -1,0 +1,5 @@
+# End-to-end browser tests (FR74). Install with the backend dev requirements, then
+#   python -m playwright install --with-deps chromium
+-r ../backend/requirements-dev.txt
+pytest-playwright==0.10.0
+playwright==1.65.2

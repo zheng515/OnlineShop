@@ -1,200 +1,179 @@
-"""SQLite storage: connection handling and schema."""
+"""Database access for SQLite and PostgreSQL (FR68).
+
+Application code talks to a `Database`, which wraps a DB-API connection of either kind and
+offers one dialect of SQL: `?` placeholders, `RETURNING id` for inserts, and the functions
+`casefold(text)` and `instr(text, text)` (SQLite has `instr` built in and gets `casefold` from
+Python; PostgreSQL gets both from migration 0001). Rows support both `row["name"]` and `row[0]`.
+
+The schema itself is created by migrations (app/migrations.py).
+"""
 
 import sqlite3
-from collections.abc import Iterator
+import threading
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
+import psycopg
 from fastapi import Request
+from psycopg_pool import ConnectionPool
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
+POOL_MAX_SIZE = 10
 
-CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL CHECK (role IN ('admin', 'customer')),
-    display_name  TEXT NOT NULL
-);
 
--- token_hash is a SHA-256 of the session identifier; the identifier itself
--- only ever lives in the browser's HttpOnly cookie (FR51).
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    csrf_token TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
+class Row:
+    """A result row readable by column name or position, like sqlite3.Row."""
 
-CREATE TABLE IF NOT EXISTS login_attempts (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    username   TEXT NOT NULL,
-    ip         TEXT NOT NULL,
-    success    INTEGER NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts (username, created_at);
-CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts (ip, created_at);
+    __slots__ = ("_names", "_values")
 
-CREATE TABLE IF NOT EXISTS categories (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name ON categories (name COLLATE NOCASE);
+    def __init__(self, names: Sequence[str], values: Sequence[Any]):
+        self._names = names
+        self._values = values
 
--- image always holds the main image (first of product_images), kept in sync
--- so lists, carts and order snapshots need no join.
-CREATE TABLE IF NOT EXISTS products (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL,
-    price_cents INTEGER NOT NULL CHECK (price_cents > 0),
-    image       TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL
-);
+    def __getitem__(self, key: int | slice | str) -> Any:
+        if isinstance(key, (int, slice)):
+            return tuple(self._values[key]) if isinstance(key, slice) else self._values[key]
+        try:
+            return self._values[self._names.index(key)]
+        except ValueError:
+            raise IndexError(f"No column named {key!r}") from None
 
--- product_id is NULL for an uploaded image not yet attached to a product (FR14).
-CREATE TABLE IF NOT EXISTS product_images (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_id  INTEGER REFERENCES products(id) ON DELETE CASCADE,
-    file        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0,
-    uploaded_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images (product_id, position);
+    def keys(self) -> list[str]:
+        return list(self._names)
 
-CREATE TABLE IF NOT EXISTS product_sizes (
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    size       TEXT NOT NULL CHECK (size IN ('S', 'M', 'L', 'XL')),
-    stock      INTEGER NOT NULL CHECK (stock >= 0),
-    PRIMARY KEY (product_id, size)
-);
+    def __iter__(self):
+        return iter(self._values)
 
--- product_id deliberately has no foreign key: when a product is deleted the
--- cart entry is kept so the customer can be told it is no longer available
--- (FR34). product_name is a snapshot used to identify such entries.
-CREATE TABLE IF NOT EXISTS cart_items (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    product_id   INTEGER NOT NULL,
-    product_name TEXT NOT NULL,
-    size         TEXT NOT NULL,
-    quantity     INTEGER NOT NULL CHECK (quantity > 0),
-    added_at     TEXT NOT NULL,
-    UNIQUE (user_id, product_id, size)
-);
+    def __len__(self) -> int:
+        return len(self._values)
 
--- request_id makes order placement idempotent per customer (FR43).
-CREATE TABLE IF NOT EXISTS orders (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL REFERENCES users(id),
-    status      TEXT NOT NULL CHECK (status IN ('placed', 'shipped', 'completed', 'cancelled')),
-    source      TEXT NOT NULL CHECK (source IN ('cart', 'buy_now')),
-    total_cents INTEGER NOT NULL CHECK (total_cents > 0),
-    request_id  TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    UNIQUE (user_id, request_id)
-);
+    def __repr__(self) -> str:
+        return f"Row({dict(zip(self._names, self._values, strict=True))!r})"
 
--- Items are a snapshot of what was ordered (FR45), so product_id has no
--- foreign key and the name, image and price are copied.
-CREATE TABLE IF NOT EXISTS order_items (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id         INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    product_id       INTEGER NOT NULL,
-    product_name     TEXT NOT NULL,
-    image            TEXT NOT NULL,
-    size             TEXT NOT NULL,
-    unit_price_cents INTEGER NOT NULL,
-    quantity         INTEGER NOT NULL CHECK (quantity > 0),
-    subtotal_cents   INTEGER NOT NULL
-);
 
-CREATE TABLE IF NOT EXISTS order_events (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    status     TEXT NOT NULL,
-    actor_role TEXT NOT NULL,
-    actor_name TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id, id);
-CREATE INDEX IF NOT EXISTS idx_products_category ON products (category_id);
-CREATE INDEX IF NOT EXISTS idx_products_price ON products (price_cents);
-CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items (order_id);
-CREATE INDEX IF NOT EXISTS idx_order_items_image ON order_items (image);
-CREATE INDEX IF NOT EXISTS idx_order_events_order ON order_events (order_id);
-"""
+def _pg_row_factory(cursor: psycopg.Cursor):
+    names = [column.name for column in cursor.description] if cursor.description else []
+    return lambda values: Row(names, values)
 
 
 def _casefold(value: str | None) -> str | None:
     return None if value is None else value.casefold()
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    # SQLite's own LIKE/lower() only fold ASCII; this folds all letters (FR16).
-    conn.create_function("casefold", 1, _casefold, deterministic=True)
-    return conn
+def sqlite_path(url: str) -> Path:
+    return Path(url.removeprefix("sqlite:///"))
 
 
-def _add_missing_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
-    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-    if not existing:
-        return
-    for name, definition in columns.items():
-        if name not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+def is_sqlite(url: str) -> bool:
+    return url.startswith("sqlite:")
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    # Databases created before rev. 4 stored raw session tokens. Sessions are
-    # short-lived, so the old table is dropped (logging everyone out) rather
-    # than migrated.
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
-    if columns and "token_hash" not in columns:
-        conn.execute("DROP TABLE sessions")
-    # Rev. 5 columns on databases created earlier; must exist before the
-    # schema script creates indexes on them.
-    _add_missing_columns(
-        conn,
-        "products",
-        {
-            "description": "TEXT NOT NULL DEFAULT ''",
-            "category_id": "INTEGER REFERENCES categories(id) ON DELETE SET NULL",
-        },
-    )
-    conn.executescript(SCHEMA)
-    # Products from before rev. 5 had a single image column only.
-    conn.execute(
-        """INSERT INTO product_images (product_id, file, position, uploaded_at)
-           SELECT p.id, p.image, 0, p.created_at FROM products p
-           WHERE NOT EXISTS (SELECT 1 FROM product_images i WHERE i.product_id = p.id)"""
-    )
-    conn.commit()
+_pools: dict[str, ConnectionPool] = {}
+_pools_lock = threading.Lock()
+
+
+def _pool(url: str) -> ConnectionPool:
+    with _pools_lock:
+        pool = _pools.get(url)
+        if pool is None:
+            pool = ConnectionPool(
+                url, min_size=1, max_size=POOL_MAX_SIZE, kwargs={"row_factory": _pg_row_factory}, open=True
+            )
+            _pools[url] = pool
+        return pool
+
+
+def close_pools() -> None:
+    with _pools_lock:
+        for pool in _pools.values():
+            pool.close()
+        _pools.clear()
+
+
+class Database:
+    """One database connection. Use `connect()` to get one and `close()` when done."""
+
+    def __init__(self, raw: Any, dialect: str, pool: ConnectionPool | None = None):
+        self.raw = raw
+        self.dialect = dialect
+        self._pool = pool
+        self.Error = sqlite3.Error if dialect == "sqlite" else psycopg.Error
+        self.IntegrityError = sqlite3.IntegrityError if dialect == "sqlite" else psycopg.IntegrityError
+
+    def _sql(self, sql: str) -> str:
+        if self.dialect == "sqlite":
+            return sql
+        # psycopg uses %s placeholders, so literal percent signs must be doubled.
+        return sql.replace("%", "%%").replace("?", "%s")
+
+    def execute(self, sql: str, params: Sequence[Any] = ()):
+        return self.raw.execute(self._sql(sql), tuple(params))
+
+    def executemany(self, sql: str, seq: Sequence[Sequence[Any]]) -> None:
+        if self.dialect == "sqlite":
+            self.raw.executemany(sql, seq)
+        else:
+            with self.raw.cursor() as cursor:
+                cursor.executemany(self._sql(sql), [tuple(params) for params in seq])
+
+    def insert(self, sql: str, params: Sequence[Any] = ()) -> int:
+        """Run an INSERT and return the new row's id."""
+        return self.execute(f"{sql} RETURNING id", params).fetchone()[0]
+
+    @property
+    def in_transaction(self) -> bool:
+        if self.dialect == "sqlite":
+            return self.raw.in_transaction
+        return self.raw.info.transaction_status != psycopg.pq.TransactionStatus.IDLE
+
+    def commit(self) -> None:
+        self.raw.commit()
+
+    def rollback(self) -> None:
+        self.raw.rollback()
+
+    def close(self) -> None:
+        if self._pool is not None:
+            if self.in_transaction:
+                self.raw.rollback()
+            self._pool.putconn(self.raw)
+        else:
+            self.raw.close()
+
+    def set_trace_callback(self, callback) -> None:
+        """SQLite only: call `callback(sql)` for each statement (used by tests)."""
+        self.raw.set_trace_callback(callback)
+
+
+def connect(url: str | Path) -> Database:
+    """Connect to `sqlite:///path`, a plain SQLite file path, or a `postgresql://` URL."""
+    url = str(url)
+    if not url.startswith(("sqlite:", "postgresql:", "postgres:")):
+        url = f"sqlite:///{url}"
+    if is_sqlite(url):
+        raw = sqlite3.connect(sqlite_path(url), check_same_thread=False, timeout=10)
+        raw.row_factory = sqlite3.Row
+        raw.execute("PRAGMA foreign_keys = ON")
+        # SQLite's own LIKE/lower() only fold ASCII; this folds all letters (FR16).
+        raw.create_function("casefold", 1, _casefold, deterministic=True)
+        return Database(raw, "sqlite")
+    pool = _pool(url)
+    return Database(pool.getconn(), "postgresql", pool)
 
 
 @contextmanager
-def write_transaction(conn: sqlite3.Connection) -> Iterator[None]:
+def write_transaction(conn: Database) -> Iterator[None]:
     """Run a block as one atomic write.
 
-    BEGIN IMMEDIATE takes SQLite's write lock up front, so stock read inside
-    the block cannot be changed by another request before the block commits.
+    On SQLite, BEGIN IMMEDIATE takes the write lock up front, so stock read inside the block
+    cannot change before it commits. On PostgreSQL the block is one transaction; stock
+    changes rely on guarded updates (`... WHERE stock >= ?`) and row locks instead.
     """
     if conn.in_transaction:
         conn.commit()
-    conn.execute("BEGIN IMMEDIATE")
+    if conn.dialect == "sqlite":
+        conn.execute("BEGIN IMMEDIATE")
     try:
         yield
     except BaseException:
@@ -203,8 +182,8 @@ def write_transaction(conn: sqlite3.Connection) -> Iterator[None]:
     conn.commit()
 
 
-def get_db(request: Request) -> Iterator[sqlite3.Connection]:
-    conn = connect(request.app.state.settings.db_path)
+def get_db(request: Request) -> Iterator[Database]:
+    conn = connect(request.app.state.settings.database_url)
     try:
         yield conn
     finally:

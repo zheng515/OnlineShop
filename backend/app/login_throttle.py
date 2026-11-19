@@ -1,9 +1,9 @@
 """Login throttling per username and per client address (FR53)."""
 
 import math
-import sqlite3
 from datetime import datetime, timedelta
 
+from .database import Database
 from .security import utcnow
 
 WINDOW = timedelta(minutes=15)
@@ -19,7 +19,7 @@ def _wait_until(failures: list[str], limit: int) -> datetime | None:
     return datetime.fromisoformat(failures[limit - 1]) + WINDOW
 
 
-def retry_after_seconds(conn: sqlite3.Connection, username: str, ip: str) -> int | None:
+def retry_after_seconds(conn: Database, username: str, ip: str) -> int | None:
     """Seconds until a login attempt is allowed again, or None if allowed now."""
     now = utcnow()
     window_start = (now - WINDOW).isoformat()
@@ -54,7 +54,7 @@ def retry_after_seconds(conn: sqlite3.Connection, username: str, ip: str) -> int
     return max(1, math.ceil((max(locks) - now).total_seconds()))
 
 
-def record_attempt(conn: sqlite3.Connection, username: str, ip: str, success: bool) -> None:
+def record_attempt(conn: Database, username: str, ip: str, success: bool) -> None:
     now = utcnow()
     conn.execute("DELETE FROM login_attempts WHERE created_at < ?", ((now - RETENTION).isoformat(),))
     conn.execute(

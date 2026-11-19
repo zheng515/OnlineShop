@@ -1,10 +1,11 @@
 import sqlite3
 
-from conftest import create_product, update_product
-
 from app.config import PROJECT_ROOT, Settings
-from app.database import connect, init_schema
+from app.database import connect
+from app.migrations import current_revision, head_revision, upgrade
 from app.products import CatalogueQuery, search_products
+
+from conftest import create_product, db, sqlite_only, update_product
 
 
 def category(client, admin, name):
@@ -122,10 +123,11 @@ def test_invalid_price_range_is_ignored_with_a_notice(client, admin, customer):
     assert client.get("/api/products?min_price=1.234", headers=customer).json()["notices"]
 
 
+@sqlite_only
 def test_search_runs_in_sql_and_loads_only_one_page(client, admin):
     for index in range(15):
         create_product(client, admin, name=f"P{index:02d}")
-    conn = connect(client.app.state.settings.db_path)
+    conn = db(client)
     statements: list[str] = []
     conn.set_trace_callback(statements.append)
     result = search_products(conn, CatalogueQuery(page=2, page_size=5))
@@ -134,9 +136,10 @@ def test_search_runs_in_sql_and_loads_only_one_page(client, admin):
     assert any("LIMIT" in s for s in statements)
 
 
-# --- Migration of databases created before rev. 5 ---------------------------
+# --- Migration of databases created before migrations (FR69) -----------------
 
 
+@sqlite_only
 def test_old_database_is_migrated(tmp_path):
     db_path = tmp_path / "old.db"
     old = sqlite3.connect(db_path)
@@ -149,9 +152,11 @@ def test_old_database_is_migrated(tmp_path):
     old.commit()
     old.close()
 
-    conn = connect(db_path)
-    init_schema(conn)
-    init_schema(conn)  # idempotent
+    url = f"sqlite:///{db_path}"
+    upgrade(url)
+    upgrade(url)  # idempotent
+    assert current_revision(url) == head_revision()
+    conn = connect(url)
     result = search_products(conn, CatalogueQuery())
     conn.close()
     product = result["products"][0]
@@ -159,15 +164,17 @@ def test_old_database_is_migrated(tmp_path):
     assert [i["file"] for i in product["images"]] == ["old.png"]
 
 
-def test_demo_data_has_categories_descriptions_and_galleries(tmp_path):
+def test_demo_data_has_categories_descriptions_and_galleries(tmp_path, database_url):
     from fastapi.testclient import TestClient
 
     from app.main import create_app
 
-    settings = Settings(db_path=tmp_path / "db", upload_dir=tmp_path / "up", frontend_dir=PROJECT_ROOT / "frontend")
+    settings = Settings(
+        db_path=tmp_path / "db", database_url=database_url, upload_dir=tmp_path / "up", frontend_dir=PROJECT_ROOT / "frontend"
+    )
     with TestClient(create_app(settings)):
         pass
-    conn = connect(settings.db_path)
+    conn = connect(settings.database_url)
     result = search_products(conn, CatalogueQuery(page_size=100))
     conn.close()
     assert result["total"] == 16

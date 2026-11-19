@@ -1,30 +1,61 @@
+import os
+import uuid
 from pathlib import Path
+from urllib.parse import quote
 
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from app.accounts import create_user
 from app.config import PROJECT_ROOT, Settings
-from app.database import connect
+from app.database import close_pools, connect
 from app.main import create_app
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
+# Set to a PostgreSQL URL to run the whole suite against PostgreSQL (FR68, FR74), e.g.
+# SHOP_TEST_DATABASE_URL=postgresql://shop:shop@localhost:5432/shop_test
+POSTGRES_URL = os.environ.get("SHOP_TEST_DATABASE_URL", "")
+sqlite_only = pytest.mark.skipif(bool(POSTGRES_URL), reason="checks SQLite-specific behaviour")
+
 
 @pytest.fixture
-def client(tmp_path: Path):
+def database_url(tmp_path: Path):
+    """A fresh, empty database for one test: a SQLite file, or its own PostgreSQL schema."""
+    if not POSTGRES_URL:
+        yield f"sqlite:///{tmp_path / 'shop.db'}"
+        return
+    schema = f"test_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
+        admin.execute(f"CREATE SCHEMA {schema}")
+    separator = "&" if "?" in POSTGRES_URL else "?"
+    yield f"{POSTGRES_URL}{separator}options={quote(f'-csearch_path={schema}')}"
+    close_pools()
+    with psycopg.connect(POSTGRES_URL, autocommit=True) as admin:
+        admin.execute(f"DROP SCHEMA {schema} CASCADE")
+
+
+@pytest.fixture
+def client(tmp_path: Path, database_url: str):
     settings = Settings(
         db_path=tmp_path / "shop.db",
+        database_url=database_url,
         upload_dir=tmp_path / "uploads",
         frontend_dir=PROJECT_ROOT / "frontend",
         seed_demo_data=False,
     )
     with TestClient(create_app(settings)) as test_client:
-        conn = connect(settings.db_path)
+        conn = connect(settings.database_url)
         for username, password, role in TEST_USERS:
             create_user(conn, username, password, role, username.title())
         conn.close()
         yield test_client
+
+
+def db(client: TestClient):
+    """A direct connection to the test app's database."""
+    return connect(client.app.state.settings.database_url)
 
 
 TEST_USERS = [("admin", "admin123", "admin"), ("alice", "alice123", "customer"), ("bob", "bob12345", "customer")]

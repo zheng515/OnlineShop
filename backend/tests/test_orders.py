@@ -1,16 +1,17 @@
 import threading
 import uuid
 
-from conftest import create_product, login, update_product, upload_image
-
 from app.database import connect
 from app.errors import ValidationProblem
 from app.order_service import place_order
 from app.orders import Line
 
+from conftest import create_product, login, update_product, upload_image
+
 
 def add_to_cart(client, headers, product_id, size, quantity):
-    response = client.post("/api/cart/items", json={"product_id": product_id, "size": size, "quantity": quantity}, headers=headers)
+    item = {"product_id": product_id, "size": size, "quantity": quantity}
+    response = client.post("/api/cart/items", json=item, headers=headers)
     assert response.status_code == 201, response.text
 
 
@@ -96,11 +97,11 @@ def test_repeated_submission_creates_one_order(client, admin, customer):
 
 def test_concurrent_orders_never_oversell(client, admin):
     shirt = create_product(client, admin, price="1", stock={"S": 3}).json()
-    db_path = client.app.state.settings.db_path
+    database_url = client.app.state.settings.database_url
     results: list[str] = []
 
     def buy(username):
-        conn = connect(db_path)
+        conn = connect(database_url)
         try:
             user = conn.execute("SELECT id, username, role FROM users WHERE username = ?", (username,)).fetchone()
             place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, uuid.uuid4().hex)
@@ -217,3 +218,27 @@ def test_admin_order_list_filter_and_search(client, admin, customer):
     assert ids("?q=nobody") == []
     detail = client.get(f"/api/admin/orders/{first['id']}", headers=admin).json()
     assert detail["customer"]["username"] == "alice"
+
+
+def test_concurrent_duplicate_submissions_create_one_order(client, admin):
+    shirt = create_product(client, admin, price="1", stock={"S": 10}).json()
+    database_url = client.app.state.settings.database_url
+    results: list[tuple[int, bool]] = []
+
+    def submit():
+        conn = connect(database_url)
+        try:
+            user = conn.execute("SELECT id, username, role FROM users WHERE username = 'alice'").fetchone()
+            results.append(place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, "same-request-xyz"))
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=submit) for _ in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len({order_id for order_id, _ in results}) == 1
+    assert sum(created for _, created in results) == 1
+    assert stock_of(client, admin, shirt["id"]) == {"S": 9}
