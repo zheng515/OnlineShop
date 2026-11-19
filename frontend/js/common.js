@@ -173,10 +173,14 @@ function renderHeader(active) {
 
   const links =
     user.role === "admin"
-      ? [{ id: "products", href: "/admin.html", label: "Product Management" }]
+      ? [
+          { id: "products", href: "/admin.html", label: "Product Management" },
+          { id: "orders", href: "/admin-orders.html", label: "Orders" },
+        ]
       : [
           { id: "shop", href: "/shop.html", label: "Products" },
           { id: "cart", href: "/cart.html", label: 'Cart <span class="badge hidden" id="cart-count">0</span>' },
+          { id: "orders", href: "/orders.html", label: "My Orders" },
         ];
 
   header.className = "site-header";
@@ -224,4 +228,52 @@ function parsePositiveInt(value) {
   if (!/^\d+$/.test(text)) return null;
   const n = Number(text);
   return n > 0 ? n : null;
+}
+
+function formatDateTime(iso) {
+  return iso ? new Date(iso).toLocaleString() : "—";
+}
+
+function statusBadge(order) {
+  return `<span class="status status-${escapeHtml(order.status)}">${escapeHtml(order.status_label)}</span>`;
+}
+
+/** A random id identifying one order submission, so a repeated click creates only one order (FR43). */
+function newRequestId() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Show a confirmation dialog. Resolves to true when the user confirms. */
+function confirmDialog({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    backdrop.innerHTML = `
+      <div class="card modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="modal-header"><h2 id="confirm-title">${escapeHtml(title)}</h2></div>
+        <div class="modal-body"><p>${escapeHtml(message)}</p></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-answer="no">${escapeHtml(cancelLabel)}</button>
+          <button type="button" class="btn ${danger ? "btn-danger" : ""}" data-answer="yes">${escapeHtml(confirmLabel)}</button>
+        </div>
+      </div>`;
+    function close(answer) {
+      document.removeEventListener("keydown", onKey);
+      backdrop.remove();
+      resolve(answer);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close(false);
+    }
+    backdrop.addEventListener("click", (e) => {
+      const button = e.target.closest("[data-answer]");
+      if (button) close(button.dataset.answer === "yes");
+      else if (e.target === backdrop) close(false);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(backdrop);
+    backdrop.querySelector('[data-answer="yes"]').focus();
+  });
 }

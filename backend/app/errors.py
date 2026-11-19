@@ -7,10 +7,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 class ValidationProblem(Exception):
-    def __init__(self, errors: list[str], status_code: int = 422):
+    """A request that cannot be completed. `extra` is merged into the response body."""
+
+    def __init__(self, errors: list[str], status_code: int = 422, extra: dict | None = None):
         super().__init__("; ".join(errors))
         self.errors = errors
         self.status_code = status_code
+        self.extra = extra or {}
 
 
 FIELD_MESSAGES = {
@@ -21,6 +24,9 @@ FIELD_MESSAGES = {
     "username": "Username is required.",
     "password": "Password is required.",
     "source": "Checkout source must be 'cart' or 'buy_now'.",
+    "expected_total": "The amount payable is missing or invalid. Please reload the page.",
+    "request_id": "The order request is invalid. Please reload the page and try again.",
+    "status": "Please choose a valid order status.",
 }
 
 
@@ -35,14 +41,15 @@ def _readable(error: dict) -> str:
     return "The request could not be understood. Please check your input."
 
 
-def _response(status_code: int, errors: list[str], headers=None) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": " ".join(errors), "errors": errors}, headers=headers)
+def _response(status_code: int, errors: list[str], headers=None, extra: dict | None = None) -> JSONResponse:
+    content = {"detail": " ".join(errors), "errors": errors, **(extra or {})}
+    return JSONResponse(status_code=status_code, content=content, headers=headers)
 
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ValidationProblem)
     async def _validation_problem(_: Request, exc: ValidationProblem):
-        return _response(exc.status_code, exc.errors)
+        return _response(exc.status_code, exc.errors, extra=exc.extra)
 
     @app.exception_handler(RequestValidationError)
     async def _request_validation(_: Request, exc: RequestValidationError):

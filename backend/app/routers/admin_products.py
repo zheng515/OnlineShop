@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from ..database import get_db
 from ..errors import ValidationProblem
 from ..images import ImageUploadError, delete_image, has_file, save_image
+from ..order_service import image_referenced_by_orders
 from ..products import admin_view, get_product, list_products, validate_product_fields
 from ..security import require_admin, utcnow
 
@@ -23,6 +24,12 @@ async def _store_image(request: Request, image: UploadFile) -> str:
         return await save_image(image, settings.upload_dir, settings.max_image_bytes)
     except ImageUploadError as exc:
         raise ValidationProblem([str(exc)]) from exc
+
+
+def _discard_image(conn: sqlite3.Connection, request: Request, file_name: str) -> None:
+    # Orders keep showing the image they were placed with (FR45).
+    if not image_referenced_by_orders(conn, file_name):
+        delete_image(request.app.state.settings.upload_dir, file_name)
 
 
 def _write_sizes(conn: sqlite3.Connection, product_id: int, sizes: dict[str, int]) -> None:
@@ -112,7 +119,7 @@ async def update(
             delete_image(upload_dir, new_file)
         raise
     if new_file:
-        delete_image(upload_dir, existing["image"])
+        _discard_image(conn, request, existing["image"])
     return admin_view(get_product(conn, product_id))
 
 
@@ -123,5 +130,5 @@ def delete(product_id: int, request: Request, conn: sqlite3.Connection = Depends
         raise _not_found()
     conn.execute("DELETE FROM products WHERE id = ?", (product_id,))
     conn.commit()
-    delete_image(request.app.state.settings.upload_dir, existing["image"])
+    _discard_image(conn, request, existing["image"])
     return {"message": f"\"{existing['name']}\" has been deleted."}

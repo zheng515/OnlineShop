@@ -1,8 +1,12 @@
 # Online Shopping Website — Functional Requirements
 
-> **Revision note:** This version clarifies requirements that were previously open to interpretation.
-> Requirement numbers FR1–FR35 are unchanged; clarifications are added to the existing requirements,
-> and rules that apply across several requirements are collected in Section 7 (FR36–FR40).
+> **Revision notes**
+> - **Rev. 2** clarified requirements that were previously open to interpretation. Requirement numbers
+>   FR1–FR35 are unchanged; clarifications are added to the existing requirements, and rules that apply
+>   across several requirements are collected in Section 7 (FR36–FR40).
+> - **Rev. 3** adds order placement and order management (Section 8, FR41–FR50). Stock is now deducted
+>   when an order is placed. FR4, FR5, FR11, FR14, FR29, FR32, FR35 and FR38 are updated accordingly.
+>   Payment processing remains out of scope.
 
 ## 1. Login and Access Control
 
@@ -22,10 +26,10 @@ The system shall support preconfigured customer accounts for this version. Custo
 - Passwords shall be stored only in hashed form.
 
 **FR4 — Role-Based Redirection**  
-After successful authentication, the system shall redirect administrators to the Product Management page and customers to the Product Browsing page.
+After successful authentication, the system shall redirect administrators to the Product Management page and customers to the Product Browsing page. Administrators can reach the Order Management page (FR49) from the navigation bar; customers can reach the Shopping Cart and My Orders (FR46).
 
 **FR5 — Role-Based Access Control**  
-The system shall restrict product management functions to authenticated administrators and shopping functions to authenticated customers.  
+The system shall restrict product management functions to authenticated administrators and shopping functions to authenticated customers. Order management is restricted to administrators, and each customer can see and act on only their own orders (FR50).  
 - Access control shall be enforced on the server for every request, not only in the user interface.  
 - A user who is not logged in, or whose session has expired (FR36), and who opens any page other than the login page shall be returned to the login page.  
 - A logged-in user who opens a page belonging to the other role shall be redirected to the home page of their own role.
@@ -56,7 +60,8 @@ The system shall allow administrators to update an existing product's image, nam
 **FR11 — Delete Product**  
 The system shall allow administrators to delete an existing product after confirming the deletion.  
 - The confirmation dialog shall name the product and state that the action cannot be undone. Cancelling shall leave the product unchanged.  
-- Deleting a product also deletes its image file. Cart entries for the deleted product are handled as described in FR34.
+- Deleting a product also deletes its image file, unless the image is still shown in an existing order (FR45). Cart entries for the deleted product are handled as described in FR34.  
+- Deleting a product shall not change or remove existing orders that contain it (FR45).
 
 **FR12 — Search Products in Management**  
 The system shall allow administrators to search for products by keyword in the Product Management page. The search shall use the same matching rules as the customer search (FR16): case-insensitive matching of the keyword anywhere in the product name. An empty keyword shall show all products. The system shall show the number of matches, or a message when no products match, and shall provide a way to clear the search.
@@ -75,7 +80,7 @@ The system shall allow administrators to upload or replace a product image and s
 - Supported formats are **JPEG, PNG, GIF and WEBP**. The format shall be determined from the file's actual contents, not from its file name or extension. Other formats, including SVG, shall be rejected.  
 - The maximum file size is **5 MB**. Empty files shall be rejected.  
 - The form shall show a preview of the selected image before saving.  
-- When an image is replaced, the previous image file shall be deleted after the product has been saved successfully. If saving fails, the product shall keep its previous image.
+- When an image is replaced, the previous image file shall be deleted after the product has been saved successfully, unless it is still shown in an existing order (FR45). If saving fails, the product shall keep its previous image.
 
 ## 3. Customer — Product Browsing and Search
 
@@ -140,7 +145,7 @@ The system shall display all items selected for checkout, including product name
 
 **FR29 — Validate Stock at Checkout**  
 The system shall revalidate the requested quantity against the current stock for each selected size before allowing the customer to continue. If stock is insufficient or a product is no longer available, the system shall notify the customer and identify the affected item.  
-- Revalidation shall take place when the Checkout page opens, when the customer chooses **Continue to Payment**, and when the Payment page opens.  
+- Revalidation shall take place when the Checkout page opens, when the customer chooses **Continue to Payment**, when the Payment page opens, and once more when the order is placed (FR41).  
 - An item has a problem when its product has been deleted, its size is no longer offered, its size is out of stock, or the requested quantity exceeds the current stock. The message shall name the product and size and, for insufficient stock, state the quantity available.  
 - While **any** item has a problem, the customer shall not be able to continue. Partial checkout of only the valid items is not provided; the customer must return to the cart or product page to remove or adjust the affected items (FR31).
 
@@ -151,9 +156,9 @@ If a product's price changes after it has been added to the cart, the system sha
 The system shall allow customers to return from the Checkout page to the shopping cart or product detail page to revise their selections. Cart checkout returns to the shopping cart; direct purchase returns to the product detail page with the previously selected size and quantity already filled in, provided the size is still in stock (the quantity is reduced to the available stock if necessary). The Payment page shall offer a way back to the Checkout page.
 
 **FR32 — Payment Page and Scope Limitation**  
-The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and total amount. Actual payment methods, payment processing, payment confirmation, and order fulfilment shall not be implemented in this version.  
-- The Payment page shall state clearly that online payment is not available in this version and that no order has been placed. The pay button shall be shown but disabled.  
-- No order record shall be created, and stock quantities and cart contents shall not be changed by visiting the Checkout or Payment page.
+The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and total amount. Actual payment methods, payment processing and payment confirmation shall not be implemented in this version. Order placement and order status tracking are specified in Section 8; physical fulfilment (shipping, delivery) happens outside the system and is only recorded through order statuses (FR47).  
+- The Payment page shall state clearly that online payment is not available in this version and that no payment will be taken. It shall provide a **Place Order** button (FR41).  
+- Visiting the Checkout or Payment page shall not create an order or change stock quantities or cart contents; only placing the order does (FR41).
 
 ## 6. Availability and Error Handling
 
@@ -167,7 +172,7 @@ If a product in a customer's cart becomes unavailable or is deleted before check
 - As long as an unavailable item remains in the cart, checkout of the cart is blocked (FR29); the customer must remove it.
 
 **FR35 — Provide Feedback for Invalid Actions**  
-The system shall display a clear message when an operation cannot be completed, including invalid product information, unavailable stock, failed image upload, invalid login credentials, or an unsuccessful product search. Where several problems are found at once (e.g. in product validation), all of them shall be listed together. Successful actions (adding, updating or deleting a product, adding to or removing from the cart) shall also be confirmed with a short message.
+The system shall display a clear message when an operation cannot be completed, including invalid product information, unavailable stock, failed image upload, invalid login credentials, an unsuccessful product search, an order that cannot be placed, or an order status change that is not allowed. Where several problems are found at once (e.g. in product validation), all of them shall be listed together. Successful actions (adding, updating or deleting a product, adding to or removing from the cart, placing, cancelling or updating an order) shall also be confirmed with a short message.
 
 ## 7. General Rules
 
@@ -177,11 +182,67 @@ A login session shall be valid for **8 hours** from the time of login, after whi
 **FR37 — Prices and Currency**  
 The shop uses a single currency. All prices, subtotals and totals shall be displayed with exactly two decimal places and calculated without rounding errors (e.g. in whole cents).
 
-**FR38 — Stock Reservation**  
-Stock shall not be reserved or reduced when items are added to the cart, when Buy Now is used, or at checkout. Stock quantities change only when an administrator updates a product. Several customers may therefore hold the same item in their carts; availability is checked again at checkout (FR29).
+**FR38 — Stock Reservation and Deduction**  
+Stock shall not be reserved when items are added to the cart, when Buy Now is used, or while the customer is on the Checkout or Payment page. Several customers may therefore hold the same item in their carts; availability is checked again at checkout (FR29) and when the order is placed (FR41). Stock quantities change only:  
+- when an administrator updates a product (FR10);  
+- when an order is placed — the ordered quantities are deducted (FR41);  
+- when an order is cancelled — the ordered quantities are added back (FR48).
 
 **FR39 — Initial Data**  
 On first start-up the system may create a set of demo products. Demo products shall be created only once: products deleted by an administrator shall not be re-created when the system is restarted.
 
 **FR40 — Server-Side Enforcement**  
 All rules in this document that restrict input or actions (access control, product validation, size and stock limits, quantity rules) shall be enforced by the server. Checks in the browser are only for faster feedback and shall not be relied on.
+
+## 8. Orders
+
+**FR41 — Place Order**  
+The system shall allow customers to place an order from the Payment page, for both cart checkout and direct purchase.  
+- When the customer chooses **Place Order**, the server shall revalidate every item against the current stock and prices (FR29) and, if everything is valid, in **one indivisible operation**: deduct the ordered quantity from the stock of each product size, create the order with status **Placed** (FR47), and — for cart checkout — remove the ordered items from the cart. Direct purchase (Buy Now) shall not change the cart.  
+- Either all of this happens or none of it does. If any item is invalid, no order is created, no stock is changed, and the customer is shown the affected items (FR29).  
+- After a successful order, the customer shall be shown a confirmation page with the order number and the order details (FR45).  
+- Payment is not taken (FR32). The confirmation shall say that the order has been placed and that no payment has been charged.
+
+**FR42 — Confirm the Amount Payable**  
+The order shall be created only for the total amount that was displayed to the customer when they chose **Place Order**. If the current total differs (for example because a price changed after the Payment page was opened), the order shall not be placed; the customer shall be told that prices have changed and shown the updated summary to confirm again.
+
+**FR43 — Prevent Duplicate Orders**  
+Submitting the same order more than once (for example by clicking **Place Order** twice, or a network retry) shall create only one order. A repeated submission shall lead to the confirmation of the order already placed. Opening the Payment page again later and placing a new order is a new order.
+
+**FR44 — Concurrent Orders**  
+Stock shall never become negative. When several customers order the same product size at the same time and the stock is not enough for all of them, only the orders that the remaining stock can satisfy shall be placed; the others shall fail with the message described in FR29.
+
+**FR45 — Order Record**  
+Each order shall record: a unique order number, the customer, the date and time it was placed, its source (cart or direct purchase), its current status and status history (FR47), and for each item the product name, image, size, unit price, quantity and subtotal, plus the order total.  
+- Item details are a record of what was ordered. They shall be stored as they were when the order was placed and shall not change if the product is later updated or deleted.  
+- The order number is shown as `#` followed by six digits, e.g. `#000042`.
+
+**FR46 — Customer Order History**  
+The system shall provide a **My Orders** page listing the customer's orders, most recent first, showing for each order its number, date, status, number of items and total. Selecting an order shall open its detail page showing all information in FR45. A message shall be shown when the customer has no orders.
+
+**FR47 — Order Statuses**  
+An order has one of the statuses **Placed**, **Shipped**, **Completed** or **Cancelled**. Only these changes are allowed:  
+
+| From    | To        | Who                       |
+|---------|-----------|---------------------------|
+| Placed  | Shipped   | Administrator             |
+| Shipped | Completed | Administrator             |
+| Placed  | Cancelled | Administrator or the customer who placed the order |
+
+Any other change shall be rejected with a message. Every status change shall be recorded in the order's status history with the new status, the date and time, and who made the change; the history shall be shown on the order detail pages.
+
+**FR48 — Cancel Order**  
+An order can be cancelled only while its status is **Placed** (FR47). The system shall ask for confirmation before cancelling.  
+- On cancellation the ordered quantities shall be added back to the stock of each product size, in the same indivisible operation as the status change.  
+- If a product has since been deleted, or the size is no longer offered, no stock is added back for that item; the cancellation still succeeds.  
+- Cancelled orders remain in the order history.
+
+**FR49 — Order Management (Administrator)**  
+The system shall provide an **Order Management** page for administrators that:  
+- lists all orders, most recent first, with order number, customer, date, status, number of items and total;  
+- can be filtered by status and searched by a keyword matched (case-insensitively) against the order number and the customer's username or display name, with a message when nothing matches;  
+- opens the details of an order (FR45) including the customer and status history;  
+- lets the administrator change the status as allowed by FR47, with a confirmation before cancelling.
+
+**FR50 — Order Access Control**  
+Customers shall be able to view and cancel only their own orders; an order that belongs to another customer shall be treated as not found. Administrators can view and manage all orders but cannot place orders. These rules shall be enforced by the server (FR40).

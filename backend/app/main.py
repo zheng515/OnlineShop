@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .database import connect, init_schema
 from .errors import install_error_handlers
-from .routers import admin_products, auth, shop
+from .routers import admin_orders, admin_products, auth, orders, shop
 from .seed import seed
 
 
@@ -37,6 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(admin_products.router)
     app.include_router(shop.router)
+    app.include_router(orders.router)
+    app.include_router(admin_orders.router)
 
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
     # Mounted last so it never shadows the API routes.

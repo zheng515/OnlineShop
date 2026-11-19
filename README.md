@@ -49,7 +49,10 @@ pytest
 | `product.html`  | customer      | Details, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33) |
 | `cart.html`     | customer      | Cart with quantity updates, removal, live prices, warnings (FR21–FR26, FR30, FR34) |
 | `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation (FR28–FR31) |
-| `payment.html`  | customer      | Order summary and amount payable; payment itself is out of scope (FR32) |
+| `payment.html`  | customer      | Order summary, amount payable and **Place Order**; payment itself is out of scope (FR32, FR41–FR43) |
+| `orders.html`   | customer      | My Orders: order history (FR46) |
+| `order.html`    | customer      | Order details, confirmation after placing, cancellation (FR45, FR47, FR48) |
+| `admin-orders.html` | administrator | Order Management: list, filter, search, details, status changes (FR47–FR49) |
 
 Every page checks the user's role and the API enforces it again (FR5); all pages have a Log out button (FR6).
 
@@ -67,8 +70,15 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   rebuilt from current data when the page loads and again when you click *Continue to Payment*.
 - **Deleted products (FR34):** cart entries for deleted products (or removed sizes) stay visible,
   marked as unavailable, and block checkout until removed.
-- **Payment (FR32):** the payment page shows the order summary and total only. No order is created
-  and stock is not reduced.
+- **Orders (FR41–FR44):** *Place Order* revalidates stock and prices and then, in one database
+  transaction holding SQLite's write lock, deducts stock, creates the order and clears the ordered
+  cart items. If anything is invalid nothing changes. The order is only placed for the total the
+  customer saw; a repeated submission (double click, retry) returns the order already placed.
+- **Order records (FR45):** items store the name, image, size and price at order time, so later
+  product edits or deletion do not change past orders; images used by orders are kept.
+- **Statuses (FR47, FR48):** Placed → Shipped → Completed, or Placed → Cancelled (by the customer
+  or an administrator), which returns the items to stock. Every change is kept in the status history.
+- **Payment (FR32):** still out of scope — orders are placed without taking any payment.
 
 ## Project layout
 
@@ -82,9 +92,10 @@ backend/
     seed.py              preconfigured accounts and demo products
     products.py          product queries and validation
     orders.py            cart / checkout pricing and stock evaluation
+    order_service.py     order placement, cancellation, status changes
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, admin_products, shop (products, cart, checkout)
+    routers/             auth, admin_products, admin_orders, shop (products, cart, checkout), orders
   tests/                 pytest suite
 frontend/
   *.html                 pages

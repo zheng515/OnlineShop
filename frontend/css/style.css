@@ -265,6 +265,36 @@ tr.has-issue td { background: #fffafa; }
 .detail-list dd { margin: 0; }
 .detail-image { width: 100%; max-height: 280px; object-fit: contain; background: var(--bg); border-radius: 8px; margin-bottom: 1rem; }
 
+/* ---------- Orders ---------- */
+.status {
+  display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 999px;
+  white-space: nowrap;
+}
+.status-placed { background: var(--primary-soft); color: var(--primary); }
+.status-shipped { background: var(--warning-soft); color: var(--warning); }
+.status-completed { background: var(--success-soft); color: var(--success); }
+.status-cancelled { background: #f3f4f6; color: var(--muted); }
+.order-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.order-meta dt { color: var(--muted); font-size: 0.8rem; }
+.order-meta dd { margin: 0.15rem 0 0; font-weight: 600; }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { position: relative; padding: 0 0 1rem 1.4rem; font-size: 0.9rem; }
+.timeline li::before {
+  content: ""; position: absolute; left: 0.2rem; top: 0.4rem; width: 0.55rem; height: 0.55rem;
+  border-radius: 50%; background: var(--primary);
+}
+.timeline li:not(:last-child)::after {
+  content: ""; position: absolute; left: 0.43rem; top: 1rem; bottom: 0; width: 2px; background: var(--border);
+}
+.timeline .when { color: var(--muted); font-size: 0.8rem; }
+.filter-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem; }
+.filter-bar select {
+  font: inherit; padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text);
+}
+.table tr.clickable { cursor: pointer; }
+.table tr.clickable:hover td { background: #fafbff; }
+.order-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
 .loading { text-align: center; padding: 2.5rem; color: var(--muted); }
 
 @media (max-width: 860px) {
@@ -275,5 +305,6 @@ tr.has-issue td { background: #fffafa; }
 }
 @media (max-width: 520px) {
   .size-stock-grid { grid-template-columns: repeat(2, 1fr); }
+  .filter-bar > * { flex: 1 1 100%; max-width: none; }
   .table .hide-sm { display: none; }
 }

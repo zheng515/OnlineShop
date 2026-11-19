@@ -71,6 +71,7 @@ def evaluate_lines(conn: sqlite3.Connection, lines: list[Line]) -> dict:
         "items": items,
         "item_count": sum(item["quantity"] for item in items),
         "total": format_cents(total_cents),
+        "total_cents": total_cents,
         "empty": not items,
         "valid": bool(items) and not issues,
         "issues": issues,
