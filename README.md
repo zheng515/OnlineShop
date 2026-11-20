@@ -33,7 +33,7 @@ with demo accounts and 16 demo products in four categories. Delete `backend/data
 | Customer      | `alice`  | `alice@example.com` | `alice123` |
 | Customer      | `bob`    | `bob@example.com`   | `bob12345` |
 
-Customers can also log in with their email address, and anyone can register a new customer account
+Alice and Bob each have a default delivery address. Customers can also log in with their email address, and anyone can register a new customer account
 at `/register.html`. In development, emails are written as `.eml` files to `backend/data/mail/`
 instead of being sent — open them there to follow confirmation and password reset links.
 
@@ -87,17 +87,18 @@ They fail on any JavaScript error or Content Security Policy violation. Set
 | `login.html`    | everyone      | Login with Administrator / Customer selection, by username or email; returns to the page that sent you (FR1–FR4, FR98) |
 | `register.html`, `verify-email.html` | visitors | Registration and email confirmation (FR89, FR90) |
 | `forgot-password.html`, `reset-password.html` | visitors | Password reset by email (FR91) |
-| `account.html`  | customer      | Display name and password (FR92) |
+| `account.html`  | customer      | Display name, password and address book (FR92, FR100) |
 | `admin.html`    | administrator | Product list with search, category filter, sorting and pages; add, view, edit, delete; images; categories (FR7–FR14, FR60–FR66) |
 | `shop.html`     | everyone      | Product grid with search, category/price/size/stock filters, sorting and pages, all kept in the URL (FR15–FR16, FR63–FR66) |
 | `product.html`  | everyone (buying: customer) | Image gallery, description, category, size & quantity selection, Add to Cart, Buy Now (FR17–FR20, FR27, FR33, FR62) |
 | `cart.html`     | customer      | Cart with quantity updates, removal, live prices, warnings (FR21–FR26, FR30, FR34) |
-| `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation (FR28–FR31) |
-| `payment.html`  | customer      | Order summary, amount payable and **Place Order and Pay** (FR32, FR41–FR43) |
+| `checkout.html` | customer      | Shared order summary for cart and Buy Now, stock revalidation, delivery address and method with the fee (FR28–FR31, FR105, FR106) |
+| `payment.html`  | customer      | Order summary, delivery, amount payable and **Place Order and Pay** (FR32, FR41–FR43) |
 | `mock-pay.html` | anyone with the link | The mock payment provider's own page (FR84) |
 | `orders.html`   | customer      | My Orders: order history, time left to pay (FR46, FR86) |
 | `order.html`    | customer      | Order details, payment result, **Pay now** with countdown, payments and refunds, cancellation (FR45–FR48, FR78–FR86) |
-| `admin-orders.html` | administrator | Order Management: list, filter, search, details, payments and refunds, status changes, refund retry (FR47–FR49, FR82) |
+| `admin-orders.html` | administrator | Order Management: list, filter, search, details with delivery, payments and refunds, status changes with carrier and tracking number, refund retry (FR47–FR49, FR82, FR108) |
+| `admin-shipping.html` | administrator | Delivery Methods: add, edit, activate, deactivate and delete methods and fees (FR103, FR104) |
 
 Every page checks the user's role and the API enforces it again (FR5); all pages have a Log out button (FR6).
 
@@ -161,6 +162,25 @@ Every page checks the user's role and the API enforces it again (FR5); all pages
   your address, someone tried to register with your address, reset your password, your password was
   changed. Order emails: placed (with the payment deadline), payment received, shipped, cancelled (with
   the reason and any refund), refund completed.
+
+## Delivery (SRS Section 14)
+
+- **Address book (FR100–FR102):** customers keep up to 10 addresses on the Account page, one of them the
+  default, and can also add one at checkout. The countries the shop delivers to are set with
+  `SHOP_DELIVERY_COUNTRIES` (default: United States); with a single country it is filled in for the customer.
+  An address in a country that is no longer on the list is kept but cannot be chosen.
+- **Delivery methods and fees (FR103, FR104):** administrators manage them on the Delivery page. Each has a
+  fee (0.00–1000.00) and optionally a free delivery threshold on the items total. Upgrading creates
+  **Standard delivery** (5.00, free from 50.00) and **Express delivery** (15.00). With no active method, no
+  order can be placed, and the admin page warns about it.
+- **Checkout (FR105, FR106):** the default address and the cheapest method are chosen at first. The summary
+  shows items, delivery fee and total payable, and says how much more buys free delivery. The choice is kept in
+  the URL between Checkout and Payment. The server checks the address, the method and the total (including the
+  fee) again when the order is placed; payments and refunds cover the delivery fee. Prices include taxes.
+- **Orders (FR107–FR109):** an order keeps a copy of the address, the method's name and the fee, so later
+  changes to the address book or methods do not affect it. Marking an order as shipped can record a carrier and
+  tracking number, shown to the customer and in the shipping email. Orders from earlier versions show that no
+  delivery details were recorded.
 
 ## Payments (SRS Section 12)
 
@@ -251,6 +271,7 @@ the login throttle sees real client addresses rather than the proxy's.
 | `SHOP_SMTP_USERNAME`, `SHOP_SMTP_PASSWORD` | empty | SMTP login (keep the password out of the repository) |
 | `SHOP_SMTP_SECURITY` | `starttls` | `starttls`, `ssl` or `none` |
 | `SHOP_EMAIL_INTERVAL_SECONDS` | `5` | How often the outbox is sent; `0` turns sending off |
+| `SHOP_DELIVERY_COUNTRIES` | `United States` | Countries the shop delivers to, comma-separated (FR102) |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxy addresses whose `X-Forwarded-For` uvicorn trusts |
 
 ### Schema migrations (FR69)
@@ -348,9 +369,11 @@ backend/
     email/               outbox, email texts, delivery (SMTP or files)
     notifications.py     order emails
     rate_limits.py       request counting for the abuse limits
+    delivery.py          address book, delivery methods and fees, delivery at checkout
     images.py            image upload validation and storage
     errors.py            uniform JSON error responses
-    routers/             auth, account, admin_products, admin_orders, catalog (categories), health, shop, orders, payments
+    routers/             auth, account, addresses, admin_products, admin_orders, admin_shipping, catalog (categories),
+                         health, shop, orders, payments
   migrations/            Alembic environment and numbered migration scripts
   tests/                 pytest suite (SQLite and PostgreSQL)
   requirements*.txt      pinned dependencies; requirements.lock pins everything (FR77)

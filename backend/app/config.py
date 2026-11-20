@@ -50,6 +50,8 @@ class Settings:
     smtp_security: str = "starttls"  # "starttls", "ssl" or "none"
     # How often the outbox is sent; 0 turns sending off (tests send explicitly).
     email_interval_seconds: int = 5
+    # Countries the shop delivers to (FR102), as they are shown on addresses.
+    delivery_countries: tuple[str, ...] = ("United States",)
 
     def __post_init__(self) -> None:
         if not self.database_url:
@@ -81,4 +83,13 @@ def load_settings() -> Settings:
         smtp_password=os.environ.get("SHOP_SMTP_PASSWORD", ""),
         smtp_security=os.environ.get("SHOP_SMTP_SECURITY", "starttls"),
         email_interval_seconds=int(os.environ.get("SHOP_EMAIL_INTERVAL_SECONDS", "5")),
+        delivery_countries=_country_list(os.environ.get("SHOP_DELIVERY_COUNTRIES", "United States")),
     )
+
+
+def _country_list(value: str) -> tuple[str, ...]:
+    """Comma-separated country names, e.g. "United States, Canada" (FR102)."""
+    countries = tuple(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
+    if not countries:
+        raise ValueError("SHOP_DELIVERY_COUNTRIES must name at least one country.")
+    return countries

@@ -4,6 +4,7 @@ email is queued exactly when the change is committed (FR95)."""
 from datetime import datetime
 
 from .database import Database
+from .delivery import address_lines
 from .email import templates
 from .email.outbox import queue_email
 from .products import format_cents
@@ -18,14 +19,30 @@ CANCEL_REASONS = {
 
 def _recipient(conn: Database, order_id: int):
     return conn.execute(
-        """SELECT o.id, o.total_cents, o.expires_at, u.email, u.display_name
-           FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = ?""",
+        """SELECT o.*, u.email, u.display_name FROM orders o JOIN users u ON u.id = o.user_id WHERE o.id = ?""",
         (order_id,),
     ).fetchone()
 
 
 def _money(cents: int) -> str:
     return f"${format_cents(cents):.2f}"
+
+
+def _delivery_lines(row) -> list[str]:
+    """Amounts and delivery details for the "order placed" email (FR96, FR107)."""
+    if row["delivery_method"] is None:
+        return []
+    fee = row["shipping_cents"]
+    address = {key: row[f"delivery_{key}"] or "" for key in ("full_name", "line1", "line2", "city", "region",
+                                                             "postal_code", "country")}
+    return [
+        f"Items: {_money(row['items_cents'])}",
+        f"Delivery ({row['delivery_method']}): {_money(fee) if fee else 'Free'}",
+        f"Total: {_money(row['total_cents'])}",
+        "",
+        "Delivery address:",
+        *(f"  {line}" for line in address_lines(address)),
+    ]
 
 
 def order_event(conn: Database, order_id: int, new_status: str, actor: dict, refunding: bool = False) -> None:
@@ -36,11 +53,12 @@ def order_event(conn: Database, order_id: int, new_status: str, actor: dict, ref
     name = row["display_name"]
     if new_status == "awaiting_payment":
         minutes = max(1, round((datetime.fromisoformat(row["expires_at"]) - utcnow()).total_seconds() / 60))
-        subject, body = templates.order_placed(name, number, order_id, _money(row["total_cents"]), minutes)
+        delivery = _delivery_lines(row)
+        subject, body = templates.order_placed(name, number, order_id, _money(row["total_cents"]), minutes, delivery)
     elif new_status == "paid":
         subject, body = templates.payment_received(name, number, order_id, _money(row["total_cents"]))
     elif new_status == "shipped":
-        subject, body = templates.order_shipped(name, number, order_id)
+        subject, body = templates.order_shipped(name, number, order_id, row["carrier"], row["tracking_number"])
     elif new_status == "cancelled":
         reason = CANCEL_REASONS.get(actor["username"] if actor["role"] == "system" else actor["role"], "")
         subject, body = templates.order_cancelled(name, number, order_id, reason, refunding)

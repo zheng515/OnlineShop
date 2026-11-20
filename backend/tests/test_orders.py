@@ -8,7 +8,15 @@ from app.order_service import place_order
 from app.orders import Line
 from app.security import utcnow
 
-from conftest import complete_mock_payment, create_product, login, update_product, upload_image
+from conftest import (
+    complete_mock_payment,
+    create_product,
+    delivery_choice,
+    direct_delivery_choice,
+    login,
+    update_product,
+    upload_image,
+)
 
 LATER = utcnow() + timedelta(hours=1)
 
@@ -20,7 +28,13 @@ def add_to_cart(client, headers, product_id, size, quantity):
 
 
 def place(client, headers, expected_total, request_id=None, **source):
-    body = {"source": "cart", **source, "expected_total": expected_total, "request_id": request_id or uuid.uuid4().hex}
+    body = {
+        "source": "cart",
+        **delivery_choice(client, headers),
+        **source,
+        "expected_total": expected_total,
+        "request_id": request_id or uuid.uuid4().hex,
+    }
     return client.post("/api/orders", json=body, headers=headers)
 
 
@@ -91,7 +105,7 @@ def test_price_change_requires_confirmation(client, admin, customer):
     update_product(client, admin, shirt["id"], price="12.00")
     response = place(client, customer, 10.0)
     assert response.status_code == 409
-    assert "Prices have changed" in response.json()["detail"]
+    assert "Prices or delivery fees have changed" in response.json()["detail"]
     assert response.json()["summary"]["total"] == 12.0
     assert place(client, customer, 12.0).status_code == 201
 
@@ -116,7 +130,8 @@ def test_concurrent_orders_never_oversell(client, admin):
         conn = connect(database_url)
         try:
             user = conn.execute("SELECT id, username, role FROM users WHERE username = ?", (username,)).fetchone()
-            place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, uuid.uuid4().hex, LATER)
+            choice = direct_delivery_choice(conn, username)
+            place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, uuid.uuid4().hex, LATER, choice)
             results.append("ok")
         except ValidationProblem:
             results.append("rejected")
@@ -246,7 +261,10 @@ def test_concurrent_duplicate_submissions_create_one_order(client, admin):
         conn = connect(database_url)
         try:
             user = conn.execute("SELECT id, username, role FROM users WHERE username = 'alice'").fetchone()
-            results.append(place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, "same-request-xyz", LATER))
+            choice = direct_delivery_choice(conn, "alice")
+            results.append(
+                place_order(conn, user, "buy_now", Line(shirt["id"], "S", 1), 100, "same-request-xyz", LATER, choice)
+            )
         finally:
             conn.close()
 

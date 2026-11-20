@@ -16,7 +16,19 @@ from .database import close_pools, connect
 from .errors import install_error_handlers
 from .jobs import start_background_jobs
 from .migrations import prepare_database
-from .routers import account, admin_orders, admin_products, auth, catalog, health, orders, payments, shop
+from .routers import (
+    account,
+    addresses,
+    admin_orders,
+    admin_products,
+    admin_shipping,
+    auth,
+    catalog,
+    health,
+    orders,
+    payments,
+    shop,
+)
 from .seed import accounts_with_demo_passwords, seed
 from .web_security import install_web_security
 
@@ -73,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(addresses.router)
     app.include_router(account.router)
     app.include_router(admin_products.router)
     app.include_router(catalog.router)
@@ -81,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(orders.router)
     app.include_router(payments.router)
     app.include_router(admin_orders.router)
+    app.include_router(admin_shipping.router)
 
     app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
     # Mounted last so it never shadows the API routes.

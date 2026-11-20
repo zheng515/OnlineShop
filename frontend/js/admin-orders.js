@@ -86,6 +86,7 @@
     document.getElementById("detail-body").innerHTML = `
       ${OrderView.meta(order, { showCustomer: true })}
       <div class="card mb-lg">${OrderView.items(order)}</div>
+      ${OrderView.delivery(order)}
       <h2>Payments and refunds</h2>
       ${OrderView.payments(order)}
       <h2 class="mt-md">Status history</h2>
@@ -109,13 +110,21 @@
     const button = e.target.closest("[data-action]");
     if (!button || !current) return;
     const action = button.dataset.action;
-    if (!(await OrderView.confirmAction(current, action))) return;
+    let body = { status: action };
+    if (action === "shipped") {
+      // Carrier and tracking number go with the shipment (FR108).
+      const shipping = await shippingDialog(current);
+      if (!shipping) return;
+      body = { ...body, ...shipping };
+    } else if (!(await OrderView.confirmAction(current, action))) {
+      return;
+    }
     button.disabled = true;
     try {
       const updated =
         action === "retry-refund"
           ? await api(`/api/admin/orders/${current.id}/refunds/retry`, { method: "POST" })
-          : await api(`/api/admin/orders/${current.id}/status`, { method: "POST", json: { status: action } });
+          : await api(`/api/admin/orders/${current.id}/status`, { method: "POST", json: body });
       toast(updated.message, "success");
       clearAlert(detailMessage);
       renderDetail(updated);
@@ -130,6 +139,50 @@
     }
     loadList();
   });
+
+  /** Ask for the carrier and tracking number; resolves to them, or null if cancelled. */
+  function shippingDialog(order) {
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "modal-backdrop";
+      backdrop.innerHTML = `
+        <form class="card modal modal-sm" role="alertdialog" aria-modal="true" aria-labelledby="ship-title" novalidate>
+          <div class="modal-header"><h2 id="ship-title">Ship order ${escapeHtml(order.number)}</h2></div>
+          <div class="modal-body">
+            <p class="muted">The customer sees these details on their order and in the shipping email. Both are optional.</p>
+            <div class="field"><label for="ship-carrier">Carrier</label>
+              <input type="text" id="ship-carrier" maxlength="50" placeholder="e.g. UPS"></div>
+            <div class="field"><label for="ship-tracking">Tracking number</label>
+              <input type="text" id="ship-tracking" maxlength="50"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-answer="no">Cancel</button>
+            <button type="submit" class="btn" id="ship-confirm">Mark as Shipped</button>
+          </div>
+        </form>`;
+      function close(answer) {
+        document.removeEventListener("keydown", onKey);
+        backdrop.remove();
+        resolve(answer);
+      }
+      function onKey(e) {
+        if (e.key === "Escape") close(null);
+      }
+      backdrop.querySelector("form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        close({
+          carrier: backdrop.querySelector("#ship-carrier").value.trim(),
+          tracking_number: backdrop.querySelector("#ship-tracking").value.trim(),
+        });
+      });
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop || e.target.closest('[data-answer="no"]')) close(null);
+      });
+      document.addEventListener("keydown", onKey);
+      document.body.appendChild(backdrop);
+      backdrop.querySelector("#ship-carrier").focus();
+    });
+  }
 
   function closeModal() {
     modal.classList.add("hidden");

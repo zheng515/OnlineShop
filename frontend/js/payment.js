@@ -1,4 +1,4 @@
-/* Payment page: order summary, total and Place Order and Pay (FR32, FR41-FR43, FR78). */
+/* Payment page: order summary, delivery, total and Place Order and Pay (FR32, FR41-FR43, FR78, FR106). */
 
 (function () {
   if (!requireRole("customer")) return;
@@ -30,10 +30,12 @@
 
   function render(summary) {
     shownSummary = summary;
-    if (!summary.valid) {
-      OrderSummary.issuesAlert(message, summary);
+    if (!summary.ready) {
+      // Items or the delivery choice need attention: that happens on the Checkout page (FR29, FR105).
+      showAlert(message, [...summary.issues, ...summary.delivery_issues], "error",
+        "Your order can no longer be placed as it is:");
       content.innerHTML = `<div class="card"><div class="empty-state">
-        <p>Your order can no longer be placed as it is. Please review it on the checkout page.</p>
+        <p>Please review your order on the checkout page.</p>
         <a class="btn" href="${checkoutUrl}">Back to Checkout</a></div></div>`;
       return;
     }
@@ -41,6 +43,7 @@
       <div class="layout-with-aside">
         <div>
           <div class="card mb-lg">${OrderSummary.itemsTable(summary)}</div>
+          ${OrderSummary.deliveryBox(summary, checkoutUrl)}
           <div class="card card-body">
             <h2>Payment</h2>
             ${
@@ -73,15 +76,22 @@
     try {
       const order = await api("/api/orders", {
         method: "POST",
-        json: { ...request, expected_total: shownSummary.total, request_id: requestId },
+        json: {
+          ...request,
+          // The address and method shown on this page (FR41, FR105).
+          address_id: shownSummary.delivery.address.id,
+          shipping_method_id: shownSummary.delivery.method.id,
+          expected_total: shownSummary.total,
+          request_id: requestId,
+        },
       });
       // On to the payment provider (FR78); the order page takes over if that is not possible.
       window.location.assign(order.payment_url || `/order.html?id=${order.id}`);
     } catch (err) {
       if (err.data.summary) {
-        // Stock or prices changed: show the current summary so the customer can decide again (FR29, FR42).
+        // Stock, prices or delivery changed: show the current summary so the customer can decide again (FR29, FR42).
         render(err.data.summary);
-        if (err.data.summary.valid) showAlert(message, err.errors, "warning");
+        if (err.data.summary.ready) showAlert(message, err.errors, "warning");
         return;
       }
       if (err.status === 0) {

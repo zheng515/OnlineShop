@@ -1,4 +1,4 @@
-/* Order details shared by the customer order page and the admin Order Management page (FR45, FR47, FR83). */
+/* Order details shared by the customer order page and the admin Order Management page (FR45, FR47, FR83, FR107, FR108). */
 
 const OrderView = {
   ACTION_LABELS: { shipped: "Mark as Shipped", completed: "Mark as Completed", cancelled: "Cancel Order" },
@@ -16,8 +16,34 @@ const OrderView = {
                  <span class="muted">(${escapeHtml(order.customer.username)})</span></dd></div>`
             : ""
         }
+        <div><dt>Items</dt><dd>${formatPrice(order.items_total)}</dd></div>
+        <div><dt>Delivery</dt><dd id="order-delivery-fee">${
+          !order.delivery ? "—" : order.shipping_fee ? formatPrice(order.shipping_fee) : "Free"
+        }</dd></div>
         <div><dt>Total</dt><dd>${formatPrice(order.total)}</dd></div>
       </dl>`;
+  },
+
+  /** Where and how the order is delivered, and the shipping details once shipped. */
+  delivery(order) {
+    const { carrier, tracking_number: tracking } = order.shipping;
+    const shipped =
+      carrier || tracking
+        ? `<p id="shipping-details"><strong>Shipped</strong>${carrier ? ` with ${escapeHtml(carrier)}` : ""}${
+            tracking ? `<br>Tracking number: <span class="ref">${escapeHtml(tracking)}</span>` : ""
+          }</p>`
+        : "";
+    if (!order.delivery) {
+      return `<h2>Delivery</h2>
+        <p class="muted">No delivery details were recorded for this order: it was placed before delivery addresses
+          were introduced.</p>${shipped}`;
+    }
+    return `<h2>Delivery</h2>
+      <div id="order-delivery">
+        <p>${AddressForm.lines(order.delivery.address)}</p>
+        <p><span class="muted">Method:</span> ${escapeHtml(order.delivery.method)}</p>
+        ${shipped}
+      </div>`;
   },
 
   items(order) {

@@ -27,6 +27,10 @@ FIELD_MESSAGES = {
     "expected_total": "The amount payable is missing or invalid. Please reload the page.",
     "request_id": "The order request is invalid. Please reload the page and try again.",
     "status": "Please choose a valid order status.",
+    "address_id": "Please choose a delivery address on the checkout page.",
+    "shipping_method_id": "Please choose a delivery method on the checkout page.",
+    "carrier": "Carrier must be at most 50 characters.",
+    "tracking_number": "Tracking number must be at most 50 characters.",
 }
 
 

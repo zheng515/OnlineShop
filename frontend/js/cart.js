@@ -67,7 +67,8 @@
         <aside class="card card-body summary-box">
           <h2>Order Summary</h2>
           <div class="row"><span class="muted">Items</span><span>${cart.item_count}</span></div>
-          <div class="row total"><span>Total</span><span>${formatPrice(cart.total)}</span></div>
+          <div class="row total"><span>Items total</span><span>${formatPrice(cart.total)}</span></div>
+          <p class="field-hint" id="delivery-hint">Delivery is chosen and added at checkout. Prices include taxes.</p>
           <button type="button" class="btn btn-lg btn-block" id="checkout-btn" ${cart.valid ? "" : "disabled"}>
             Proceed to Checkout
           </button>

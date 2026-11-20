@@ -16,6 +16,11 @@ DEMO_USERS = [
 ]
 # Confirmed addresses, so the demo shows account and order emails (FR96).
 DEMO_EMAILS = {"alice": "alice@example.com", "bob": "bob@example.com"}
+# A default delivery address for each demo customer (FR100).
+DEMO_ADDRESSES = {
+    "alice": ("Alice Example", "+1 555 0100", "12 Market Street", "Apt 4", "Springfield", "IL", "62701"),
+    "bob": ("Bob Example", "+1 555 0101", "800 Harbor Road", "", "Portland", "OR", "97201"),
+}
 
 DEMO_CATEGORIES = ["T-Shirts", "Shirts", "Hoodies & Sweatshirts", "Jackets"]
 
@@ -95,6 +100,19 @@ def seed(conn: Database, upload_dir: Path, with_demo_data: bool) -> None:
                 (email, now, username, email),
             )
     conn.commit()
+
+    # Demo addresses are created once, like demo products, so deleting them sticks.
+    if conn.execute("INSERT INTO meta (key, value) VALUES ('demo_addresses_seeded', '1') ON CONFLICT DO NOTHING").rowcount:
+        for username, (name, phone, line1, line2, city, region, postal_code) in DEMO_ADDRESSES.items():
+            user = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+            if user and not conn.execute("SELECT 1 FROM addresses WHERE user_id = ?", (user["id"],)).fetchone():
+                conn.execute(
+                    """INSERT INTO addresses (user_id, full_name, phone, line1, line2, city, region, postal_code, country,
+                                              is_default, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'United States', ?, ?, ?)""",
+                    (user["id"], name, phone, line1, line2, city, region, postal_code, True, now, now),
+                )
+        conn.commit()
 
     # Demo products are only created once, so an administrator deleting them does not
     # bring them back on the next restart. Claiming the flag first means only one worker

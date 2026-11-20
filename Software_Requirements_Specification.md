@@ -24,6 +24,11 @@
 >   logging in, customers can register, confirm their email address, reset a forgotten password and
 >   manage their account, and the shop sends account and order emails. FR1–FR6, FR15–FR17, FR19,
 >   FR53, FR54 and FR59 are updated accordingly.
+> - **Rev. 9** adds delivery (Section 14, FR100–FR109): customers keep an address book, choose a
+>   delivery address and a delivery method at checkout, and pay a delivery fee set by the shop.
+>   Orders record where and how they are delivered, and shipped orders can carry a carrier and a
+>   tracking number. Prices include taxes. FR25, FR28, FR29, FR32, FR37, FR41, FR42, FR45, FR47,
+>   FR49, FR92 and FR96 are updated accordingly.
 
 ## 1. Login and Access Control
 
@@ -158,7 +163,8 @@ The system shall display an appropriate message and shall not allow customers to
 **FR25 — Recalculate Cart Prices**  
 The system shall calculate each cart item's subtotal as the current unit price multiplied by its quantity, and calculate the cart total as the sum of all item subtotals. The system shall use the current product price when displaying the cart and checkout summary.  
 - An unavailable item (FR34) has no unit price or subtotal and is not included in the total.  
-- Amounts are calculated as described in FR37.
+- Amounts are calculated as described in FR37.  
+- The cart total is the total of the items only; the cart page shall say that the delivery fee is added at checkout (FR105).
 
 **FR26 — Proceed to Checkout from Cart**  
 The system shall allow customers to proceed from a non-empty shopping cart to the Checkout page with all cart items and their selected sizes and quantities. Proceeding is only possible when **every** item in the cart can be purchased (see FR29 and FR34). The cart shall be refreshed with current data when the customer chooses to proceed.
@@ -169,13 +175,14 @@ The system shall allow customers to proceed from a non-empty shopping cart to th
 The system shall allow customers to select a size and quantity on a product detail page and proceed directly to the Checkout page without adding the product to the shopping cart. The same size and quantity rules as for Add to Cart apply (FR18, FR19). Buy Now shall not change the contents of the cart.
 
 **FR28 — Display Checkout Summary**  
-The system shall display all items selected for checkout, including product names, images, sizes, quantities, unit prices, subtotals, and the total amount payable. The same summary format shall be used for cart checkout and direct purchase.
+The system shall display all items selected for checkout, including product names, images, sizes, quantities, unit prices, subtotals, the items total, the delivery fee (FR106) and the total amount payable. The same summary format shall be used for cart checkout and direct purchase. The Checkout page also lets the customer choose the delivery address and delivery method (FR105).
 
 **FR29 — Validate Stock at Checkout**  
 The system shall revalidate the requested quantity against the current stock for each selected size before allowing the customer to continue. If stock is insufficient or a product is no longer available, the system shall notify the customer and identify the affected item.  
 - Revalidation shall take place when the Checkout page opens, when the customer chooses **Continue to Payment**, when the Payment page opens, and once more when the order is placed (FR41).  
 - An item has a problem when its product has been deleted, its size is no longer offered, its size is out of stock, or the requested quantity exceeds the current stock. The message shall name the product and size and, for insufficient stock, state the quantity available.  
-- While **any** item has a problem, the customer shall not be able to continue. Partial checkout of only the valid items is not provided; the customer must return to the cart or product page to remove or adjust the affected items (FR31).
+- While **any** item has a problem, the customer shall not be able to continue. Partial checkout of only the valid items is not provided; the customer must return to the cart or product page to remove or adjust the affected items (FR31).  
+- The chosen delivery address and delivery method are checked at the same moments (FR105).
 
 **FR30 — Handle Price Changes**  
 If a product's price changes after it has been added to the cart, the system shall use the current price in the cart and checkout summary and recalculate the relevant subtotals and total.
@@ -184,7 +191,9 @@ If a product's price changes after it has been added to the cart, the system sha
 The system shall allow customers to return from the Checkout page to the shopping cart or product detail page to revise their selections. Cart checkout returns to the shopping cart; direct purchase returns to the product detail page with the previously selected size and quantity already filled in, provided the size is still in stock (the quantity is reduced to the available stock if necessary). The Payment page shall offer a way back to the Checkout page.
 
 **FR32 — Payment Page**  
-The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and the total amount payable, with a **Place Order and Pay** button that places the order (FR41) and takes the customer to the payment provider (FR78). Physical fulfilment (shipping, delivery) happens outside the system and is only recorded through order statuses (FR47).  
+The system shall provide a checkout/payment page for both cart checkout and direct purchase, displaying the order summary and the total amount payable, with a **Place Order and Pay** button that places the order (FR41) and takes the customer to the payment provider (FR78).  
+- The page shall show the chosen delivery address and delivery method, with a way back to the Checkout page to change them (FR105).  
+- Packing and delivering the goods happen outside the system; the system records where and how an order is delivered (FR107), its status (FR47) and the shipping details (FR108).  
 - While the mock payment provider is in use (FR84), the page shall state that payments are test payments and that no real money is charged.  
 - Visiting the Checkout or Payment page shall not create an order or change stock quantities or cart contents; only placing the order does (FR41).
 
@@ -208,7 +217,7 @@ The system shall display a clear message when an operation cannot be completed, 
 A login session shall be valid for **8 hours** from the time of login, after which the user must log in again (FR5). A session ends earlier if the user logs out (FR6) or the account's password is changed (FR54). Sessions are handled as described in FR51.
 
 **FR37 — Prices and Currency**  
-The shop uses a single currency. All prices, subtotals and totals shall be displayed with exactly two decimal places and calculated without rounding errors (e.g. in whole cents).
+The shop uses a single currency. All prices, subtotals and totals shall be displayed with exactly two decimal places and calculated without rounding errors (e.g. in whole cents). Product prices and delivery fees include all taxes; the system does not calculate taxes separately or issue invoices.
 
 **FR38 — Stock Reservation and Deduction**  
 Stock shall not be reserved when items are added to the cart, when Buy Now is used, or while the customer is on the Checkout or Payment page. Several customers may therefore hold the same item in their carts; availability is checked again at checkout (FR29) and when the order is placed (FR41). Stock quantities change only:  
@@ -226,13 +235,13 @@ All rules in this document that restrict input or actions (access control, produ
 
 **FR41 — Place Order**  
 The system shall allow customers to place an order from the Payment page, for both cart checkout and direct purchase.  
-- When the customer chooses **Place Order**, the server shall revalidate every item against the current stock and prices (FR29) and, if everything is valid, in **one indivisible operation**: deduct the ordered quantity from the stock of each product size, create the order with status **Awaiting payment** and a payment deadline (FR47, FR79), and — for cart checkout — remove the ordered items from the cart. Direct purchase (Buy Now) shall not change the cart.  
-- Either all of this happens or none of it does. If any item is invalid, no order is created, no stock is changed, and the customer is shown the affected items (FR29).  
+- When the customer chooses **Place Order**, the server shall revalidate every item against the current stock and prices (FR29), and the delivery address and delivery method (FR105), and, if everything is valid, in **one indivisible operation**: deduct the ordered quantity from the stock of each product size, create the order with status **Awaiting payment**, a payment deadline (FR47, FR79) and its delivery details (FR107), and — for cart checkout — remove the ordered items from the cart. Direct purchase (Buy Now) shall not change the cart.  
+- Either all of this happens or none of it does. If any item is invalid, no order is created, no stock is changed, and the customer is shown the affected items (FR29). If the delivery address or method can no longer be used, no order is created and the customer is sent back to the Checkout page to choose again.  
 - After the order has been created, the customer shall be taken to the payment provider to pay (FR78). If the customer does not pay right away, the order stays in **My Orders** with a **Pay now** button until its payment deadline (FR79, FR80).  
 - The order becomes **Paid** only when the payment provider confirms the payment (FR78, FR81).
 
 **FR42 — Confirm the Amount Payable**  
-The order shall be created only for the total amount that was displayed to the customer when they chose **Place Order**. If the current total differs (for example because a price changed after the Payment page was opened), the order shall not be placed; the customer shall be told that prices have changed and shown the updated summary to confirm again.
+The order shall be created only for the total amount that was displayed to the customer when they chose **Place Order**, including the delivery fee. If the current total differs (for example because a price or a delivery fee changed after the Payment page was opened), the order shall not be placed; the customer shall be told that prices have changed and shown the updated summary to confirm again.
 
 **FR43 — Prevent Duplicate Orders**  
 Submitting the same order more than once (for example by clicking **Place Order** twice, or a network retry) shall create only one order. A repeated submission shall lead to the order already placed (and to its payment, if it is still awaiting payment). Opening the Payment page again later and placing a new order is a new order.
@@ -241,7 +250,7 @@ Submitting the same order more than once (for example by clicking **Place Order*
 Stock shall never become negative. When several customers order the same product size at the same time and the stock is not enough for all of them, only the orders that the remaining stock can satisfy shall be placed; the others shall fail with the message described in FR29.
 
 **FR45 — Order Record**  
-Each order shall record: a unique order number, the customer, the date and time it was placed, its source (cart or direct purchase), its current status and status history (FR47), and for each item the product name, main image (FR62), size, unit price, quantity and subtotal, plus the order total.  
+Each order shall record: a unique order number, the customer, the date and time it was placed, its source (cart or direct purchase), its current status and status history (FR47), for each item the product name, main image (FR62), size, unit price, quantity and subtotal, the items total, the delivery details and delivery fee (FR107), the order total, and the shipping details once shipped (FR108).  
 - Item details are a record of what was ordered. They shall be stored as they were when the order was placed and shall not change if the product is later updated or deleted.  
 - The order number is shown as `#` followed by six digits, e.g. `#000042`.
 
@@ -255,7 +264,7 @@ An order has one of the statuses **Awaiting payment**, **Paid**, **Shipped**, **
 |------------------|-----------|-----|
 | Awaiting payment | Paid      | The system, when the payment provider confirms payment (FR78) |
 | Awaiting payment | Cancelled | The customer who placed the order, an administrator, or the system when the payment deadline passes (FR79) |
-| Paid             | Shipped   | Administrator |
+| Paid             | Shipped   | Administrator, optionally with a carrier and tracking number (FR108) |
 | Paid             | Cancelled | The customer who placed the order, or an administrator; the payment is refunded (FR82) |
 | Shipped          | Completed | Administrator |
 
@@ -272,8 +281,8 @@ An order can be cancelled only while its status is **Awaiting payment** or **Pai
 The system shall provide an **Order Management** page for administrators that:  
 - lists all orders, most recent first, with order number, customer, date, status, number of items and total;  
 - can be filtered by status and searched by a keyword matched (case-insensitively) against the order number and the customer's username or display name, with a message when nothing matches;  
-- opens the details of an order (FR45) including the customer, status history, payment attempts and refunds (FR83);  
-- lets the administrator change the status as allowed by FR47, with a confirmation before cancelling, and retry a failed refund (FR82).
+- opens the details of an order (FR45) including the customer, delivery details (FR107), status history, payment attempts and refunds (FR83);  
+- lets the administrator change the status as allowed by FR47, with a confirmation before cancelling, enter the shipping details when marking an order as shipped (FR108), and retry a failed refund (FR82).
 
 **FR50 — Order Access Control**  
 Customers shall be able to view and cancel only their own orders; an order that belongs to another customer shall be treated as not found. Administrators can view and manage all orders but cannot place orders. These rules shall be enforced by the server (FR40).
@@ -474,7 +483,7 @@ Visitors who are not logged in shall be able to browse, search, filter and sort 
 - Accounts without an email address (for example administrators created without one) cannot be reset this way; the operator uses the account command instead.
 
 **FR92 — Account Page**  
-Logged-in customers shall have an **Account** page showing their username and email address, where they can change their display name and change their password by entering the current password and the new one twice. A password change ends their other sessions (FR54) and sends a notification email (FR96). Changing the email address is not offered in this version.
+Logged-in customers shall have an **Account** page showing their username and email address, where they can change their display name and change their password by entering the current password and the new one twice. A password change ends their other sessions (FR54) and sends a notification email (FR96). The page also holds the customer's address book (FR100). Changing the email address is not offered in this version.
 
 **FR93 — Account Tokens**  
 Email confirmation and password reset links shall carry a random, unguessable token. The server shall store only a one-way hash of it, accept it only before it expires and only once, and treat an unknown, expired or used token the same way.
@@ -490,7 +499,7 @@ Email confirmation and password reset links shall carry a random, unguessable to
 
 **FR96 — Emails Sent**  
 - **Account:** email confirmation (FR90); a notice to an existing account owner when someone registers with their address (FR89); password reset link (FR91); notice that the password was changed (FR91, FR92).  
-- **Orders** (to the customer who placed the order, if their account has an email address): order placed and awaiting payment, with the amount, the payment deadline and a link to pay (FR79); payment received; order shipped; order cancelled, with the reason (by the customer, by the shop, or because the payment deadline passed) and whether a refund was started; refund completed.
+- **Orders** (to the customer who placed the order, if their account has an email address): order placed and awaiting payment, with the items total, delivery fee and amount payable, the delivery address and method, the payment deadline and a link to pay (FR79); payment received; order shipped, with the carrier and tracking number if given (FR108); order cancelled, with the reason (by the customer, by the shop, or because the payment deadline passed) and whether a refund was started; refund completed.
 
 **FR97 — Email Content**  
 Emails shall be plain text, address the customer by display name, name the order number where relevant, and contain links only to the shop's own public address (FR99). They shall never contain passwords. Each email shall say why it was sent.
@@ -500,3 +509,56 @@ When a visitor is sent to the login page from a shop page (FR5, FR19), the addre
 
 **FR99 — Configuration**  
 The shop's public address (used in email links), the sender address, the email delivery method and the SMTP server's host, port, user name, password and encryption shall be configurable through environment variables (FR70). The SMTP password, like other secrets, shall not be stored in the repository.
+
+## 14. Delivery
+
+**FR100 — Address Book**  
+- Customers shall keep their delivery addresses in an address book on the Account page (FR92), where they can add, edit and delete addresses and choose a **default** address. Addresses can also be added at checkout (FR105).  
+- A customer can have at most **10** addresses. When a customer has addresses, exactly one of them is the default: the first address added becomes the default, and when the default is deleted, the oldest remaining address becomes the default.  
+- Changing or deleting an address does not change orders already placed (FR107). Administrators have no address book.  
+- A customer can see and change only their own addresses; another customer's address shall be treated as not found (FR40).
+
+**FR101 — Address Fields**  
+Leading and trailing spaces are removed; line breaks and other control characters are not allowed. All problems shall be reported together.
+
+| Field | Rule |
+|-------|------|
+| Full name of the recipient | required, at most 100 characters |
+| Phone number | required, 6–20 characters of digits, spaces and `+ - ( )`, with at least 6 digits |
+| Address line 1 | required, at most 100 characters |
+| Address line 2 | optional, at most 100 characters |
+| City | required, at most 60 characters |
+| State, province or region | optional, at most 60 characters |
+| Postal code | required, at most 12 characters of letters, digits, spaces and hyphens |
+| Country | required, one of the delivery countries (FR102) |
+
+**FR102 — Delivery Countries**  
+The shop delivers to a list of countries set in the configuration (FR70); by default only the **United States**. The same delivery methods and fees apply to every country on the list. When the list has one country, it is chosen automatically. An address whose country is no longer on the list stays in the address book, marked as not deliverable, and cannot be chosen at checkout.
+
+**FR103 — Delivery Methods and Fees**  
+- The shop offers one or more **delivery methods**, each with a name (1–50 characters, unique regardless of letter case), an optional description such as the delivery time (at most 100 characters), a fee from **0.00** to **1,000.00**, and optionally a **free delivery threshold** (0.01–1,000,000.00): when the items total of an order (FR25) reaches the threshold, the fee for that method is 0.00.  
+- A method can be active or inactive; customers see only active methods, cheapest first (by the fee that applies to their order, then by name).  
+- When the system is upgraded to this revision, two active methods are created, which administrators can change: **Standard delivery** ("3–5 business days", 5.00, free from 50.00) and **Express delivery** ("1–2 business days", 15.00, no threshold).
+
+**FR104 — Managing Delivery Methods**  
+Administrators shall have a **Delivery Methods** page listing all methods (active and inactive) where they can add, edit, activate, deactivate and delete methods, with the rules of FR103 checked by the server and all problems reported together. Deleting asks for confirmation. Orders already placed keep the method name and fee they were placed with (FR107). The page shall warn when no method is active, because then no orders can be placed.
+
+**FR105 — Choosing Delivery at Checkout**  
+- The Checkout page shall show the customer's addresses, with the default address chosen at first, and let the customer choose another one or add a new address, which is saved in the address book (FR100). A customer without addresses is shown the form to add one.  
+- The page shall show the active delivery methods with their fee for this order (or **Free**) and description, with the cheapest chosen at first, and how much more the customer would need to buy for free delivery where a threshold applies.  
+- Changing the address or method updates the summary straight away (FR28). The choice is kept when the customer goes on to the Payment page and back.  
+- The customer can continue to the Payment page only when the items are valid (FR29), an address that can be delivered to is chosen, and an active method is chosen. When the chosen address has been deleted, its country is no longer delivered to, or the chosen method is no longer active, the customer shall be told and asked to choose again. When no method is active, the page shall say that orders cannot be placed at the moment.
+
+**FR106 — Order Total**  
+The total payable is the items total (FR25) plus the delivery fee of the chosen method (FR103). The summary shall show the items total, the delivery fee (or **Free**) and the total payable. The payment (FR78) and any refund (FR82) are for the total payable, including the delivery fee.
+
+**FR107 — Delivery Details in Orders**  
+- An order shall record, as they were when it was placed: the delivery address (all fields of FR101), the delivery method's name and the delivery fee, and the items total.  
+- The customer's order page and the administrator's order details shall show the delivery address, method and fee.  
+- The delivery address of an order cannot be changed after the order is placed.
+
+**FR108 — Shipping Details**  
+When marking an order as **Shipped** (FR47), the administrator may enter the carrier (at most 50 characters) and the tracking number (at most 50 characters). They are shown on the order pages of the customer and the administrator and included in the "order shipped" email (FR96).
+
+**FR109 — Orders from Earlier Versions**  
+Orders placed before this revision have no delivery details and a delivery fee of 0.00; their order pages shall say that no delivery details were recorded. They can still be shipped, completed and cancelled as before.

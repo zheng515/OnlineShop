@@ -42,6 +42,7 @@ services:
       SHOP_SMTP_USERNAME: ${SHOP_SMTP_USERNAME:-}
       SHOP_SMTP_PASSWORD: ${SHOP_SMTP_PASSWORD:-}
       SHOP_SMTP_SECURITY: ${SHOP_SMTP_SECURITY:-starttls}
+      SHOP_DELIVERY_COUNTRIES: ${SHOP_DELIVERY_COUNTRIES:-United States}
     ports:
       - "${SHOP_PORT:-8000}:8000"
     volumes:

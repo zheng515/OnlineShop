@@ -2,11 +2,12 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
 
 from ..config import SIZES
 from ..database import Database, Row, get_db
+from ..delivery import apply_delivery
 from ..errors import ValidationProblem
 from ..orders import Line, cart_lines, evaluate_lines
 from ..products import customer_detail, customer_summary, get_product, search_products
@@ -36,6 +37,9 @@ class CheckoutRequest(BaseModel):
     product_id: int | None = None
     size: Size | None = None
     quantity: Quantity | None = None
+    # Delivery choice (FR105); without them the default address and the cheapest method are used.
+    address_id: int | None = None
+    shipping_method_id: int | None = None
 
     @model_validator(mode="after")
     def _buy_now_fields(self):
@@ -165,16 +169,19 @@ def remove_cart_item(item_id: int, user=Depends(require_customer), conn: Databas
 
 
 @router.post("/checkout")
-def checkout_summary(body: CheckoutRequest, user=Depends(require_customer), conn: Database = Depends(get_db)):
-    """Build the checkout summary, revalidating stock and prices against current data.
+def checkout_summary(
+    body: CheckoutRequest, request: Request, user=Depends(require_customer), conn: Database = Depends(get_db)
+):
+    """Build the checkout summary, revalidating stock, prices and the delivery choice against
+    current data (FR28, FR29, FR105, FR106).
 
-    Used both to display the Checkout page and to revalidate before the
-    customer continues to payment. No order is placed and stock is not
-    reduced: payment and fulfilment are out of scope (FR32).
+    Used both to display the Checkout and Payment pages and to revalidate before the customer
+    continues. No order is placed and stock is not reduced (FR32).
     """
     if body.source == "cart":
         summary = _cart(conn, user["id"])
     else:
         summary = evaluate_lines(conn, [Line(body.product_id, body.size, body.quantity)])
     summary["source"] = body.source
-    return summary
+    countries = request.app.state.settings.delivery_countries
+    return apply_delivery(conn, summary, user["id"], countries, body.address_id, body.shipping_method_id)
