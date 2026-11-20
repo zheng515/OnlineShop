@@ -217,6 +217,7 @@ function renderHeader(active) {
       ? [
           { id: "products", href: "/admin.html", label: "Product Management" },
           { id: "orders", href: "/admin-orders.html", label: "Orders" },
+          { id: "shipping", href: "/admin-shipping.html", label: "Delivery" },
         ]
       : [
           { id: "shop", href: "/shop.html", label: "Products" },

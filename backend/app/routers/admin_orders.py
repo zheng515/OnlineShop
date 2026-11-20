@@ -3,10 +3,12 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..database import Database, get_db
-from ..order_service import STATUS_LABELS, change_status, get_order, list_orders
+from ..delivery import CONTROL_CHARACTERS
+from ..errors import ValidationProblem
+from ..order_service import STATUS_LABELS, ShippingDetails, change_status, get_order, list_orders
 from ..payments.service import expire_if_overdue, process_refunds, retry_failed_refunds
 from ..security import require_admin
 
@@ -17,6 +19,17 @@ OrderStatus = Literal["awaiting_payment", "paid", "shipped", "completed", "cance
 
 class StatusChangeRequest(BaseModel):
     status: Literal["shipped", "completed", "cancelled"]
+    # Only used when marking an order as shipped (FR108).
+    carrier: str = Field("", max_length=50)
+    tracking_number: str = Field("", max_length=50)
+
+    def shipping(self) -> ShippingDetails | None:
+        if self.status != "shipped":
+            return None
+        details = ShippingDetails(self.carrier.strip(), self.tracking_number.strip())
+        if CONTROL_CHARACTERS.search(details.carrier + details.tracking_number):
+            raise ValidationProblem(["Carrier and tracking number must be on one line without special characters."])
+        return details
 
 
 @router.get("")
@@ -36,7 +49,7 @@ def order_detail(order_id: int, conn: Database = Depends(get_db)):
 def update_status(
     order_id: int, body: StatusChangeRequest, request: Request, user=Depends(require_admin), conn: Database = Depends(get_db)
 ):
-    refund_ids = change_status(conn, order_id, body.status, user)
+    refund_ids = change_status(conn, order_id, body.status, user, shipping=body.shipping())
     process_refunds(conn, request.app.state.settings, refund_ids)
     order = get_order(conn, order_id, "admin")
     order["message"] = f"Order {order['number']} is now {STATUS_LABELS[body.status]}."

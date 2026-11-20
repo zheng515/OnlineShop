@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import Field
 
 from ..database import Database, get_db
-from ..order_service import change_status, get_order, list_orders, place_order
+from ..order_service import DeliveryChoice, change_status, get_order, list_orders, place_order
 from ..orders import Line
 from ..payments.service import expire_if_overdue, process_refunds, start_or_resume_payment
 from ..security import require_customer, utcnow
@@ -20,6 +20,9 @@ class PlaceOrderRequest(CheckoutRequest):
     expected_total: float = Field(gt=0)
     # Generated once per Payment page visit so a repeated submission is recognised (FR43).
     request_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9-]+$")
+    # Placing an order needs an explicit delivery choice (FR41, FR105).
+    address_id: int
+    shipping_method_id: int
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -33,8 +36,9 @@ def place(
     settings = request.app.state.settings
     buy_now = Line(body.product_id, body.size, body.quantity) if body.source == "buy_now" else None
     deadline = utcnow() + timedelta(minutes=settings.payment_timeout_minutes)
+    delivery = DeliveryChoice(body.address_id, body.shipping_method_id, settings.delivery_countries)
     order_id, created = place_order(
-        conn, user, body.source, buy_now, round(body.expected_total * 100), body.request_id, deadline
+        conn, user, body.source, buy_now, round(body.expected_total * 100), body.request_id, deadline, delivery
     )
     if not created:
         response.status_code = status.HTTP_200_OK

@@ -1,20 +1,27 @@
-/* Order summary shared by the Checkout and Payment pages, for cart and Buy Now alike (FR28). */
+/* Order summary shared by the Checkout and Payment pages, for cart and Buy Now alike (FR28, FR105, FR106). */
 
 const OrderSummary = {
   /** Read the checkout request (cart or Buy Now) from the page URL. Returns null if malformed. */
   requestFromUrl() {
     const source = queryParam("source") || "cart";
-    if (source === "cart") return { source: "cart" };
+    // The delivery choice is kept in the URL between Checkout and Payment (FR105).
+    const delivery = {};
+    const addressId = parsePositiveInt(queryParam("address_id") || "");
+    const methodId = parsePositiveInt(queryParam("shipping_method_id") || "");
+    if (addressId) delivery.address_id = addressId;
+    if (methodId) delivery.shipping_method_id = methodId;
+    if (source === "cart") return { source: "cart", ...delivery };
     if (source !== "buy_now") return null;
     const productId = parsePositiveInt(queryParam("product_id") || "");
     const quantity = parsePositiveInt(queryParam("quantity") || "");
     const size = queryParam("size");
     if (!productId || !quantity || !SIZES.includes(size)) return null;
-    return { source: "buy_now", product_id: productId, size, quantity };
+    return { source: "buy_now", product_id: productId, size, quantity, ...delivery };
   },
 
   queryString(request) {
-    return new URLSearchParams(request).toString();
+    const params = Object.entries(request).filter(([, value]) => value !== undefined && value !== null);
+    return new URLSearchParams(params).toString();
   },
 
   /** Where "back" goes from checkout: the cart, or the product page with the selection kept (FR31). */
@@ -57,9 +64,37 @@ const OrderSummary = {
   },
 
   totals(summary) {
+    const method = summary.delivery && summary.delivery.method;
+    const fee = !method ? "—" : summary.shipping_fee ? formatPrice(summary.shipping_fee) : "Free";
     return `
-      <div class="row"><span class="muted">Items</span><span>${summary.item_count}</span></div>
-      <div class="row total"><span>Total payable</span><span>${formatPrice(summary.total)}</span></div>`;
+      <div class="row"><span class="muted">Items (${summary.item_count})</span><span>${formatPrice(summary.items_total)}</span></div>
+      <div class="row"><span class="muted">Delivery${method ? ` · ${escapeHtml(method.name)}` : ""}</span>
+        <span id="delivery-fee">${fee}</span></div>
+      <div class="row total"><span>Total payable</span><span id="total-payable">${formatPrice(summary.total)}</span></div>`;
+  },
+
+  /** A delivery method's fee for this order, with how much more buys free delivery (FR103, FR105). */
+  methodFee(method) {
+    if (!method.fee) return "<strong>Free</strong>";
+    const free = method.amount_to_free
+      ? `<span class="field-hint">Free if you add ${formatPrice(method.amount_to_free)} more</span>`
+      : "";
+    return `<strong>${formatPrice(method.fee)}</strong>${free}`;
+  },
+
+  /** The chosen address and method, for the Payment page (FR32). */
+  deliveryBox(summary, changeHref) {
+    const { address, method } = summary.delivery;
+    return `
+      <div class="card card-body mb-lg delivery-box">
+        <div class="section-head"><h2>Delivery</h2><a href="${changeHref}" id="change-delivery">Change</a></div>
+        <div class="delivery-columns">
+          <div><h3>Address</h3><p id="delivery-address">${AddressForm.lines(address)}</p></div>
+          <div><h3>Method</h3><p id="delivery-method">${escapeHtml(method.name)}${
+            method.description ? `<br><span class="muted">${escapeHtml(method.description)}</span>` : ""
+          }<br>${this.methodFee(method)}</p></div>
+        </div>
+      </div>`;
   },
 
   issuesAlert(container, summary) {

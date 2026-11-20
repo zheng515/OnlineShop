@@ -26,6 +26,22 @@
             <button type="submit" class="btn" id="profile-btn">Save display name</button>
           </form>
         </section>
+        <section class="card card-body mb-lg" id="address-book">
+          <div class="section-head">
+            <h2>Address book</h2>
+            <button type="button" class="btn btn-secondary btn-sm" id="add-address-btn">Add address</button>
+          </div>
+          <div id="address-message" class="hidden" role="alert"></div>
+          <div id="address-list" class="address-list"><div class="loading">Loading your addresses…</div></div>
+          <form id="address-form" class="address-form hidden" novalidate>
+            <h3 id="address-form-title">New address</h3>
+            <div id="address-form-fields"></div>
+            <div class="form-actions">
+              <button type="submit" class="btn" id="address-save-btn">Save address</button>
+              <button type="button" class="btn btn-secondary" id="address-cancel-btn">Cancel</button>
+            </div>
+          </form>
+        </section>
         <section class="card card-body">
           <h2>Change password</h2>
           <form id="password-form" novalidate>
@@ -51,6 +67,7 @@
   </main>
 
   <script src="/js/common.js"></script>
+  <script src="/js/address-form.js"></script>
   <script src="/js/account.js"></script>
 </body>
 </html>

@@ -38,7 +38,8 @@
         <div class="card">${OrderView.items(order)}</div>
         <aside class="card card-body">
           ${OrderView.meta(order)}
-          <h2>Payment</h2>
+          ${OrderView.delivery(order)}
+          <h2 class="mt-md">Payment</h2>
           ${OrderView.payments(order)}
           <h2 class="mt-md">Status history</h2>
           ${OrderView.history(order)}

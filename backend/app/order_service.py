@@ -1,10 +1,12 @@
 """Order placement, cancellation and status changes (FR41-FR50, FR79, FR82, FR87)."""
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import HTTPException, status
 
 from .database import Database, Row, write_transaction
+from .delivery import address_lines, apply_delivery, order_delivery_values
 from .errors import ValidationProblem
 from .images import image_url
 from .notifications import order_event
@@ -40,10 +42,31 @@ class OrderChanged(Exception):
     """The order was no longer in the expected status when a change was applied."""
 
 
+@dataclass(frozen=True)
+class DeliveryChoice:
+    """Where and how an order is to be delivered, as chosen at checkout (FR105)."""
+
+    address_id: int | None
+    method_id: int | None
+    countries: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ShippingDetails:
+    """Carrier and tracking number entered when an order is shipped (FR108)."""
+
+    carrier: str = ""
+    tracking_number: str = ""
+
+
 def system_actor(name: str) -> dict:
     return {"role": "system", "username": name}
 
-PRICE_CHANGED = "Prices have changed since this page was opened. Please review the updated total and place the order again."
+PRICE_CHANGED = (
+    "Prices or delivery fees have changed since this page was opened."
+    " Please review the updated total and place the order again."
+)
+DELIVERY_FIELDS = ("full_name", "phone", "line1", "line2", "city", "region", "postal_code", "country")
 
 
 def order_number(order_id: int) -> str:
@@ -78,12 +101,16 @@ def place_order(
     expected_total_cents: int,
     request_id: str,
     payment_deadline: datetime,
+    delivery: DeliveryChoice,
 ) -> tuple[int, bool]:
-    """Place an order atomically, awaiting payment until `payment_deadline` (FR41, FR79).
+    """Place an order atomically, awaiting payment until `payment_deadline` (FR41, FR79), to be
+    delivered as chosen at checkout (FR105-FR107).
 
     Returns (order_id, created); created is False for a repeated request (FR43)."""
     try:
-        return _place_order(conn, customer, source, buy_now_line, expected_total_cents, request_id, payment_deadline)
+        return _place_order(
+            conn, customer, source, buy_now_line, expected_total_cents, request_id, payment_deadline, delivery
+        )
     except conn.IntegrityError:
         # The same request was placed concurrently by another process (PostgreSQL does not
         # serialise the two the way SQLite's write lock does); return the order it created.
@@ -101,6 +128,7 @@ def _place_order(
     expected_total_cents: int,
     request_id: str,
     payment_deadline: datetime,
+    delivery: DeliveryChoice,
 ) -> tuple[int, bool]:
     with write_transaction(conn):
         existing = _order_for_request(conn, customer["id"], request_id)
@@ -110,16 +138,22 @@ def _place_order(
         lines = cart_lines(conn, customer["id"]) if source == "cart" else [buy_now_line]
         summary = evaluate_lines(conn, lines)
         summary["source"] = source
-        if not summary["valid"]:
-            raise ValidationProblem(summary["issues"], status.HTTP_409_CONFLICT, extra={"summary": summary})
+        apply_delivery(conn, summary, customer["id"], delivery.countries, delivery.address_id, delivery.method_id)
+        if not summary["ready"]:
+            problems = summary["issues"] + summary["delivery_issues"]
+            raise ValidationProblem(problems, status.HTTP_409_CONFLICT, extra={"summary": summary})
         if summary["total_cents"] != expected_total_cents:
             raise ValidationProblem([PRICE_CHANGED], status.HTTP_409_CONFLICT, extra={"summary": summary})
 
         now = utcnow().isoformat()
+        details = order_delivery_values(summary)
+        columns = ", ".join(details)
         order_id = conn.insert(
-            """INSERT INTO orders (user_id, status, source, total_cents, request_id, created_at, updated_at, expires_at)
-               VALUES (?, 'awaiting_payment', ?, ?, ?, ?, ?, ?)""",
-            (customer["id"], source, summary["total_cents"], request_id, now, now, payment_deadline.isoformat()),
+            f"""INSERT INTO orders (user_id, status, source, total_cents, request_id, created_at, updated_at, expires_at,
+                                   {columns})
+                VALUES (?, 'awaiting_payment', ?, ?, ?, ?, ?, ?, {", ".join("?" * len(details))})""",
+            (customer["id"], source, summary["total_cents"], request_id, now, now, payment_deadline.isoformat(),
+             *details.values()),
         )
 
         for line in lines:
@@ -180,7 +214,13 @@ def create_refunds(conn: Database, order_id: int, reason: str, now: str, payment
 
 
 def apply_transition(
-    conn: Database, order_id: int, current: str, new_status: str, actor: Row | dict, now: str
+    conn: Database,
+    order_id: int,
+    current: str,
+    new_status: str,
+    actor: Row | dict,
+    now: str,
+    shipping: ShippingDetails | None = None,
 ) -> list[int]:
     """Change the status inside the caller's transaction. Returns ids of refunds to send.
 
@@ -192,6 +232,9 @@ def apply_transition(
         params.append(now)
     if new_status == "cancelled":
         sets.append("expires_at = NULL")
+    if new_status == "shipped" and shipping:
+        sets += ["carrier = ?", "tracking_number = ?"]
+        params += [shipping.carrier or None, shipping.tracking_number or None]
     updated = conn.execute(
         f"UPDATE orders SET {', '.join(sets)} WHERE id = ? AND status = ?", [*params, order_id, current]
     ).rowcount
@@ -223,7 +266,12 @@ def apply_transition(
 
 
 def change_status(
-    conn: Database, order_id: int, new_status: str, actor: Row | dict, owner_id: int | None = None
+    conn: Database,
+    order_id: int,
+    new_status: str,
+    actor: Row | dict,
+    owner_id: int | None = None,
+    shipping: ShippingDetails | None = None,
 ) -> list[int]:
     """Apply a status change allowed by FR47. Cancelling puts the stock back (FR48) and, for a
     paid order, records a refund. Returns the ids of refunds to send to the payment provider."""
@@ -245,7 +293,7 @@ def change_status(
                 message = f"An order that is {STATUS_LABELS[current]} cannot be marked as {STATUS_LABELS[new_status]}."
             raise ValidationProblem([message], status.HTTP_409_CONFLICT)
         try:
-            return apply_transition(conn, order_id, current, new_status, actor, utcnow().isoformat())
+            return apply_transition(conn, order_id, current, new_status, actor, utcnow().isoformat(), shipping)
         except OrderChanged:
             raise ValidationProblem(
                 ["This order was changed at the same time by someone else. Please reload it and try again."],
@@ -278,6 +326,8 @@ def _summary(row: Row, viewer_role: str) -> dict:
         "status_label": STATUS_LABELS[row["status"]],
         "source": row["source"],
         "total": format_cents(row["total_cents"]),
+        "items_total": format_cents(row["items_cents"] if row["items_cents"] is not None else row["total_cents"]),
+        "shipping_fee": format_cents(row["shipping_cents"]),
         "item_count": row["item_count"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -287,6 +337,14 @@ def _summary(row: Row, viewer_role: str) -> dict:
         "customer": {"username": row["username"], "display_name": row["display_name"]},
         "allowed_actions": _allowed_actions(row["status"], viewer_role),
     }
+
+
+def _delivery(row: Row) -> dict | None:
+    """Delivery details recorded with the order; None for orders from before rev. 9 (FR107, FR109)."""
+    if row["delivery_method"] is None:
+        return None
+    address = {key: row[f"delivery_{key}"] or "" for key in DELIVERY_FIELDS}
+    return {"address": {**address, "lines": address_lines(address)}, "method": row["delivery_method"]}
 
 
 def list_orders(
@@ -328,6 +386,8 @@ def get_order(conn: Database, order_id: int, viewer_role: str, user_id: int | No
         raise _not_found()
 
     order = _summary(row, viewer_role)
+    order["delivery"] = _delivery(row)
+    order["shipping"] = {"carrier": row["carrier"], "tracking_number": row["tracking_number"]}
     order["items"] = [
         {
             "product_id": item["product_id"],

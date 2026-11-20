@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delivery Methods · OnlineShop</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header id="site-header"></header>
+
+  <main class="container">
+    <div class="page-head">
+      <h1>Delivery Methods</h1>
+      <button type="button" class="btn" id="add-btn">Add method</button>
+    </div>
+    <p class="muted">Customers choose one of the active methods at checkout. The fee is added to the order total; it is
+      0.00 when the items total reaches the free delivery threshold. Fees include taxes.</p>
+
+    <div id="list-message" class="hidden" role="alert"></div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="hide-sm">Description</th>
+              <th class="text-right">Fee</th>
+              <th class="text-right">Free from</th>
+              <th>Status</th>
+              <th class="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="method-rows"><tr><td colspan="6"><div class="loading">Loading…</div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <div class="modal-backdrop hidden" id="method-modal">
+    <form class="card modal" id="method-form" role="dialog" aria-modal="true" aria-labelledby="method-title" novalidate>
+      <div class="modal-header">
+        <h2 id="method-title">Add delivery method</h2>
+        <button type="button" class="modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="form-message" class="hidden" role="alert"></div>
+        <div class="field"><label for="name-input">Name</label>
+          <input type="text" id="name-input" maxlength="50" placeholder="e.g. Standard delivery"></div>
+        <div class="field"><label for="description-input">Description (optional)</label>
+          <input type="text" id="description-input" maxlength="100" placeholder="e.g. 3–5 business days"></div>
+        <div class="field"><label for="fee-input">Fee (<span class="currency">$</span>)</label>
+          <input type="text" id="fee-input" inputmode="decimal" placeholder="0.00">
+          <div class="field-hint">0.00 to 1000.00. Enter 0 for free delivery.</div></div>
+        <div class="field"><label for="free-over-input">Free delivery from (<span class="currency">$</span>, optional)</label>
+          <input type="text" id="free-over-input" inputmode="decimal">
+          <div class="field-hint">When the items total reaches this amount, this method is free. Leave empty for no threshold.</div></div>
+        <label class="check-row"><input type="checkbox" id="active-input" checked> Active (offered at checkout)</label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="submit" class="btn" id="save-btn">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin-shipping.js"></script>
+</body>
+</html>

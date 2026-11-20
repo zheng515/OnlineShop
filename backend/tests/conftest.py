@@ -49,6 +49,7 @@ def client(tmp_path: Path, database_url: str):
         conn = connect(settings.database_url)
         for username, password, role in TEST_USERS:
             create_user(conn, username, password, role, username.title())
+        setup_test_delivery(conn)
         conn.close()
         yield test_client
 
@@ -56,6 +57,55 @@ def client(tmp_path: Path, database_url: str):
 def db(client: TestClient):
     """A direct connection to the test app's database."""
     return connect(client.app.state.settings.database_url)
+
+
+TEST_DELIVERY_METHOD = "Test delivery"
+
+
+def setup_test_delivery(conn) -> None:
+    """Give each test customer an address and add a free delivery method, which is then the
+    cheapest, so order tests can reason about item prices alone. Delivery addresses, methods
+    and fees themselves are tested in test_delivery.py (FR100-FR109)."""
+    now = "2026-01-01T00:00:00+00:00"
+    for (user_id,) in conn.execute("SELECT id FROM users WHERE role = 'customer'").fetchall():
+        conn.execute(
+            """INSERT INTO addresses (user_id, full_name, phone, line1, line2, city, region, postal_code, country,
+                                      is_default, created_at, updated_at)
+               VALUES (?, 'Test Customer', '555 0100 00', '1 Test Street', '', 'Testville', 'TS', '12345',
+                       'United States', ?, ?, ?)""",
+            (user_id, True, now, now),
+        )
+    conn.execute(
+        """INSERT INTO shipping_methods (name, description, fee_cents, free_over_cents, active, created_at, updated_at)
+           VALUES (?, '', 0, NULL, ?, ?, ?)""",
+        (TEST_DELIVERY_METHOD, True, now, now),
+    )
+    conn.commit()
+
+
+def delivery_choice(client: TestClient, headers: dict) -> dict:
+    """The customer's first address and the free test delivery method, as sent when placing an order."""
+    book = client.get("/api/account/addresses", headers=headers)
+    # Administrators have no address book (FR100); any id will do for checking they are refused.
+    address_id = book.json()["addresses"][0]["id"] if book.status_code == 200 else 1
+    conn = db(client)
+    try:
+        method_id = conn.execute("SELECT id FROM shipping_methods WHERE name = ?", (TEST_DELIVERY_METHOD,)).fetchone()[0]
+    finally:
+        conn.close()
+    return {"address_id": address_id, "shipping_method_id": method_id}
+
+
+def direct_delivery_choice(conn, username: str):
+    """The same choice for calling order_service.place_order directly."""
+    from app.config import Settings
+    from app.order_service import DeliveryChoice
+
+    address_id = conn.execute(
+        "SELECT a.id FROM addresses a JOIN users u ON u.id = a.user_id WHERE u.username = ?", (username,)
+    ).fetchone()[0]
+    method_id = conn.execute("SELECT id FROM shipping_methods WHERE name = ?", (TEST_DELIVERY_METHOD,)).fetchone()[0]
+    return DeliveryChoice(address_id, method_id, Settings.delivery_countries)
 
 
 TEST_USERS = [("admin", "admin123", "admin"), ("alice", "alice123", "customer"), ("bob", "bob12345", "customer")]

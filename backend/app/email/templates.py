@@ -76,12 +76,15 @@ def _order_link(order_id: int) -> str:
     return f"{SHOP_URL}/order.html?id={order_id}"
 
 
-def order_placed(name: str, number: str, order_id: int, total: str, minutes: int) -> tuple[str, str]:
+def order_placed(
+    name: str, number: str, order_id: int, total: str, minutes: int, delivery: list[str] | None = None
+) -> tuple[str, str]:
     return _email(
         f"Order {number}: please complete your payment",
         name,
         [
             f"Thank you for your order {number}. The amount payable is {total}.",
+            *([""] + delivery if delivery else []),
             "",
             f"Your items are held for you for {minutes} minutes. If the payment is not completed by then,",
             "the order is cancelled automatically. Pay or check your order here:",
@@ -100,11 +103,18 @@ def payment_received(name: str, number: str, order_id: int, total: str) -> tuple
     )
 
 
-def order_shipped(name: str, number: str, order_id: int) -> tuple[str, str]:
+def order_shipped(
+    name: str, number: str, order_id: int, carrier: str | None = None, tracking_number: str | None = None
+) -> tuple[str, str]:
+    tracking = []
+    if carrier:
+        tracking.append(f"Carrier: {carrier}")
+    if tracking_number:
+        tracking.append(f"Tracking number: {tracking_number}")
     return _email(
         f"Order {number} has been shipped",
         name,
-        [f"Good news: your order {number} is on its way.", "", _order_link(order_id)],
+        [f"Good news: your order {number} is on its way.", *([""] + tracking if tracking else []), "", _order_link(order_id)],
         "You received this email because an order of yours was shipped.",
     )
 

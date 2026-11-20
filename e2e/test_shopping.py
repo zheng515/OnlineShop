@@ -110,7 +110,7 @@ def test_price_change_while_paying_and_double_click(shop):
     admin.context.close()
 
     shop.page.click("#place-order-btn")
-    expect(shop.page.locator("#payment-message")).to_contain_text("Prices have changed")
+    expect(shop.page.locator("#payment-message")).to_contain_text("Prices or delivery fees have changed")
     expect(shop.page.locator("#place-order-btn")).to_have_text("Place Order and Pay · $79.99")
     shop.page.dblclick("#place-order-btn")
     on_mock_provider(shop)
@@ -133,10 +133,27 @@ def test_admin_moves_an_order_through_its_statuses(shop):
     shop.after_api("/api/admin/orders", lambda: shop.page.select_option("#status-filter", "paid"))
     shop.page.click("tr[data-id] >> nth=0")
     expect(shop.page.locator("#detail-actions")).to_have_text(re.compile("Mark as Shipped.*Cancel Order", re.S))
-    shop.after_api("/status", lambda: shop.page.click("[data-action=shipped]"))
+    shop.page.click("[data-action=shipped]")
+    shop.page.fill("#ship-carrier", "UPS")
+    shop.page.fill("#ship-tracking", "1Z999AA10123456784")
+    shop.after_api("/status", lambda: shop.page.click("#ship-confirm"))
+    shipped = re.compile(r"Shipped with UPS\s*Tracking number: 1Z999AA10123456784")
+    expect(shop.page.locator("#shipping-details")).to_have_text(shipped)
     shop.after_api("/status", lambda: shop.page.click("[data-action=completed]"))
     expect(shop.page.locator("#detail-body .timeline")).to_contain_text("Completed by administrator admin")
     expect(shop.page.locator("#detail-actions")).to_have_text("")
+    shop.page.keyboard.press("Escape")  # close the order details
+    expect(shop.page.locator(".toast")).to_have_count(0, timeout=10_000)  # toasts cover the Log out button
+    shop.logout()
+
+    # The customer sees the delivery and shipping details (FR107, FR108).
+    shop.login("alice")
+    shop.goto("/orders.html")
+    shop.page.click("tr[data-id] >> nth=0")
+    shop.page.wait_for_url("**/order.html?id=*")
+    expect(shop.page.locator("#order-delivery")).to_contain_text("Alice Example")
+    expect(shop.page.locator("#order-delivery")).to_contain_text("Standard delivery")
+    expect(shop.page.locator("#shipping-details")).to_contain_text("Tracking number: 1Z999AA10123456784")
 
 
 def test_declined_payment_then_pay_now(shop):
